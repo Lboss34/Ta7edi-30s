@@ -1,0 +1,23 @@
+WE ARE UPGRADING THE GAME DATABASE TO A FULL-STACK CLOUD ARCHITECTURE.
+You must directly connect our app to MongoDB Atlas and perform an automated, direct migration of ALL our existing questions, STRICTLY preserving and organizing them by their respective difficulty levels.
+
+### ⚙️ DIRECT MIGRATION & DIFFICULTY PROTOCOL:
+1. **Install Driver:** Run `npm install mongodb` inside the workspace directory.
+2. **Automated Extraction with Difficulty:** Open our current question database files. Automatically extract ALL 2026 accurate questions, choices, validAnswers, and Arabic player career paths for ALL 5 rounds plus the Tiebreaker. 
+3. **Strict Difficulty Tagging:** For every single question migrated, you MUST explicitly include a `difficulty` field (string value: `"easy"`, `"medium"`, or `"hard"`) in the database document based on its current folder, array, or level in the local code.
+4. **Direct Cloud Push:** Connect to our MongoDB Atlas cluster and distribute all existing tagged questions into beautifully organized, separate cloud collections:
+   - `round1_questions` (What Do You Know)
+   - `round2_questions` (The Auction)
+   - `round3_questions` (Buzzer Round)
+   - `round4_questions` (30-Sec Challenge)
+   - `round5_questions` (Guess the Player)
+   - `tiebreaker_questions` (Golden Goal - default tag to "medium")
+
+5. **Switch Data Layer to Async Filtered Fetch:** Modify our app's `GameContext` so that upon app boot, it performs an asynchronous fetch directly from MongoDB Atlas over the internet. Ensure that when a player selects a specific difficulty in the game menu, the context correctly filters and loads the matching documents where `difficulty === selectedDifficulty`.
+
+Connection URI to configure: mongodb+srv://iyadkhalfa201_db_user:jFX7EWvSQbzcTdbY@ta7edi-30.wsbauqj.mongodb.net/?appName=Ta7edi-30
+
+### 🛡️ QUALITY CONTROL:
+- Do NOT touch or break any UI layouts, neon styles, or sound hooks (`useSounds`).
+- Ensure strict optional chaining (`?.`) is intact on the frontend to avoid rendering crashes.
+- Run `npx tsc --noEmit` at the end to guarantee a 100% clean TypeScript build.

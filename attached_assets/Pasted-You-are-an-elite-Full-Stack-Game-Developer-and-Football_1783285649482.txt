@@ -1,0 +1,35 @@
+You are an elite Full-Stack Game Developer and Football Data Expert. We are pushing the crucial "V4.0 Sound & Pure Database Cleansing Update". 
+
+IMPORTANT CONTEXT: The current year is 2026. All football data must be 100% real, authentic, and updated up to 2026. Absolutely NO fictional players, NO corrupted transfer paths, and NO broken internal logic.
+
+DO NOT rewrite the entire application. Integrate these strict data fixes and the sound system directly into the existing React Native state machine. 
+
+---
+
+### PHASE 1: "GUESS THE PLAYER" & "TIEBREAKER" DATA PURGE & OVERHAUL
+1. **Remove Club Logos Completely:** Drop the `<ClubBadge />` and all Wikimedia image URL logic entirely. It is causing visual bugs and rendering failures. This round must rely strictly on beautiful, glow-styled typography for text paths.
+2. **Strict Transfer Path Format (RTL):** Ensure the transfer path text maps correctly from Right-to-Left (Latest club first -> earliest club last) with country tags in Arabic parentheses. 
+   * *Example text flow:* الاتحاد (السعودي) <- ريال مدريد (الإسباني) <- أولمبيك ليون (الفرنسي).
+3. **Database Cleansing (Critical):** Eliminate any bugs where the host sees multiple/confusing player names (e.g., displaying "Player X: No, Answer is Player Y"). The data schema for the Host Answer must be a single, definitive string: `correctAnswer: "اسم اللاعب"`.
+4. **Authentic 2026 Player Injection:** Replace the current bugged roster with a brand new, hand-curated dataset of at least 30 REAL football legends and active players per difficulty level (Easy, Medium, Hard). All active career paths must be correct as of 2026 (e.g., De Bruyne at Napoli, Mbappe at Real Madrid, etc.).
+5. **Golden Goal Tiebreaker Fix:** The Sudden Death question must strictly pull a verified, 100% accurate player from the Medium/Hard tiers. No easy players allowed here.
+
+### PHASE 2: AUDIO SYSTEM INTEGRATION (`expo-av`)
+Implement a robust Sound Effects system using `expo-av` that triggers automatically:
+1. **Audio Tracks Needed:**
+   - Success/Correct Ding (Play on correct answers)
+   - Failure/Wrong Buzzer (Play on wrong answers & when a Strike ❌ is added)
+   - Countdown Ticking (Play during the 30-second challenge and Auction timers)
+   - Winner Fanfare (Play on the Winner screen and Golden Goal victory)
+2. **Premium Mute Feature:** Add a sleek "Mute/Unmute" toggle button in the game's header/settings. Save this preference in the state.
+3. **Crash Prevention (Try/Catch):** Wrap all sound-loading and playback functions in strict `try/catch` blocks. If an audio asset fails, the game must continue flawlessly without freezing or throwing runtime crashes.
+
+---
+
+### 🛠️ SECURITY & CODE INTEGRITY AUDIT (DO NOT SKIP)
+Before executing, perform a full internal codebase review:
+- Check for missing imports, syntax errors, or unhandled exceptions in the React Native state.
+- Ensure the audio initialization doesn't cause memory leaks on screen unmounts.
+- Confirm the text direction (RTL) for Arabic typography doesn't break the UI layout on iOS/Android.
+
+The plan is fully approved. Proceed to output the corrected Database and updated Audio/Round components immediately without waiting for further approval!

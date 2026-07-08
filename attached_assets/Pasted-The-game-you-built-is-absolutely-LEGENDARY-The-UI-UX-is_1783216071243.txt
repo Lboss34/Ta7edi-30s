@@ -1,0 +1,52 @@
+The game you built is absolutely LEGENDARY! The UI/UX is breathtaking, and the codebase is 98% bug-free. Outstanding job!
+
+Now, we need to push a Major Update (V2.0) to refine the gameplay mechanics, introduce a global difficulty system, add a missing round, and inject a massive, high-quality question bank. 
+
+IMPORTANT: DO NOT rewrite the entire application or change the existing premium design. Integrate the following features precisely into the existing state machine. 
+
+Since we are streamlining the process, I have already created the Strict Execution Plan for you. 
+DO NOT ASK FOR APPROVAL. Read the plan below and START WRITING THE CODE IMMEDIATELY, component by component, until the update is fully implemented.
+
+---
+
+### THE STRICT EXECUTION PLAN (IMPLEMENT IMMEDIATELY):
+
+#### PHASE 1: GLOBAL STATE & DATABASE ARCHITECTURE
+1. **Difficulty Selector:** Add a premium selection screen before the game starts with 3 difficulties: Easy (سهل), Medium (متوسط), Hard (صعب). Update the global state to track this.
+2. **Massive JSON Database Schema:** Create a robust structure for hundreds of questions, categorized by Round and Difficulty. Include a substantial placeholder set of real-world football data so the game is highly playable right now.
+3. **Strict Round Order:** Hardcode the state machine to flow exactly like this:
+   - Round 1: The 4 Questions (الأسئلة الأربعة)
+   - Round 2: The Auction (المزاد)
+   - Round 3: The Buzzer (الجرس) -> [NEW]
+   - Round 4: The 30-Second Challenge (تحدي الثلاثين)
+   - Round 5: Guess the Player (خمن اللاعب)
+
+#### PHASE 2: REFACTORING EXISTING ROUNDS & HOST UI
+1. **The Auction (المزاد):**
+   - Inject Medium/Hard questions. Set to exactly 3 questions total.
+   - Update Scoring Logic: 1-19 answers = 1 Point | 20-29 answers = 2 Points | 30+ answers = 3 Points.
+   - Host UI Update: During the 30-second countdown, render a scrollable list of "Possible Correct Answers" for the Host to verify. Add an "End Timer Early" button.
+2. **The 30-Second Challenge:**
+   - Inject much harder questions.
+   - Host UI Update: Ensure the Host sees the correct answer clearly displayed right next to/below each rapid-fire question to verify instantly.
+3. **Guess the Player (Transfers Only):**
+   - Change data structure: Remove birthdates/stats. Use ONLY chronological club transfers (e.g., Vitória Guimarães -> Sporting CP -> Leeds United -> FC Barcelona | Answer: Raphinha).
+   - Set to exactly 4 rounds.
+   - Mechanic Update: It is a simultaneous "fastest finger/shout" race, NOT turn-based.
+   - Host UI Update: Show the hidden Player Name exclusively to the Host.
+
+#### PHASE 3: BUILDING THE NEW "BUZZER" ROUND
+1. **Mechanics:** Fast-paced shootout. Host reads the question, players shout. ONE attempt per player. If P1 is wrong, P1 is locked out and P2 can guess.
+2. **Host UI Design:**
+   - Display Question + Correct Answer.
+   - Render a [Player 1] button (left) and [Player 2] button (right).
+   - Render a "Burn Question" (سؤال محروق) button in the center.
+   - Logic: Host clicks the player who shouted -> Selects "Correct" (awards point, next Q) OR "Wrong" (locks player out, enables the other).
+
+#### PHASE 4: THE SUDDEN DEATH TIE-BREAKER
+1. **Logic:** At the end of Round 5, check scores. If Player 1 == Player 2, trigger a "Golden Question" (سؤال الفصل الذهبي) screen.
+2. **Mechanics:** Pull exactly ONE Medium-difficulty question from the "Guess the Player" (Transfers) database. The first to answer correctly wins the entire game instantly.
+
+---
+### EXECUTION COMMAND:
+The plan is set. Do not explain the plan back to me. Output the updated React/Next.js code directly. Start with updating the global state/context and the database schema, then proceed to update the UI components round by round. Output as much code as possible!

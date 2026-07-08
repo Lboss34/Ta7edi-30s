@@ -1,0 +1,35 @@
+CRITICAL BUG FIXES, RANDOMIZATION & DATABASE MAINTENANCE
+
+Please implement the following four critical updates to fix fundamental game logic flaws, ensure true question randomization, and clean up the database. Read the architectural guidelines at the end before altering the codebase.
+
+⚠️ TASK 1: DATABASE DEDUPLICATION SCRIPT (ALL LEVELS & ROUNDS)
+1. Create a temporary maintenance script `deduplicate.ts`.
+2. Connect to MongoDB Atlas using the `MONGODB_URI` secret.
+3. Scan all 6 collections: `round1_questions`, `round2_questions`, `round3_questions`, `round4_questions`, `round5_questions`, and `tiebreaker_questions`.
+4. For each collection, scan across all difficulty levels ("easy", "medium", "hard"). 
+5. Find duplicate documents based on the text fields:
+   - For Rounds 1, 3, 4: Duplicate `question` text.
+   - For Rounds 2: Duplicate `description` text.
+   - For Round 5 & Tiebreaker: Duplicate `answer` text or identical `transfers` arrays.
+6. If duplicates are found, KEEP the original document (the first `_id`) and safely DELETE the duplicate documents. 
+7. Execute this script once automatically using `npx tsx deduplicate.ts` and report the number of deleted duplicates per collection.
+
+⚠️ TASK 2: FIX ROUND 4 LOGIC (RAPID CHALLENGE / INDEPENDENT COUNTER)
+- BUG: Currently, the 10-question limit for the 30-second round is shared/bleeding over between players. If Player 1 faces 6 questions, Player 2 is erroneously capped at 4 questions maximum.
+- FIX: Refactor the Round 4 component logic so that the question pool index or counter is completely independent per player. When Player 1's turn ends and Player 2's turn begins, Player 2 MUST have a reset, fresh pool/slice of up to 10 questions available for their own 30-second window. Each player's turn must be completely isolated logically.
+
+⚠️ TASK 3: FIX ROUND 1 LOGIC (PINGPONG / MANUAL OVERRIDE ADJUSTMENT)
+- BUG: In Round 1 ("What Do You Know"), when a player gives a correct answer that is NOT in our pre-defined `validAnswers` list, the host clicks the manual "Correct" (صحيح) button. Currently, clicking this button triggers an unwanted behavior where the app randomly selects and checks off one of the unrevealed pre-defined answers from our list UI.
+- FIX: Modify the manual override button click handler. When clicked, it should award the point to the active player and advance the turn normally, but it MUST NOT automatically check, reveal, cross out, or alter any item from the `validAnswers` array rendered on the screen. The list UI should remain untouched.
+
+⚠️ TASK 4: COMPULSORY RANDOMIZATION & SHUFFLING (ALL ROUNDS)
+- BUG: Every time the app is restarted or a new game session begins, the exact same questions appear in the exact same static order. There is no randomness.
+- FIX: Refactor the backend controller queries or server aggregation pipelines fetching the questions. 
+  - For MongoDB fetching, switch to using the `$sample` aggregation stage (e.g., `{ $match: { difficulty: currentDifficulty } }, { $sample: { size: targetSize } }`) instead of a basic `.find()`. 
+  - Alternatively, if fetched in bulk, implement a robust client-side/server-side Fisher-Yates shuffle algorithm on the retrieved array before passing it into the game state, ensuring that every single match spin yields a completely unpredictable set and order of questions.
+
+⚙️ TECHNICAL & ARCHITECTURAL ADVICE TO PREVENT BUGS (COMPULSORY):
+1. STRICT TYPE INTEGRITY: Do NOT break or modify the existing frontend/backend interfaces (`PingPongQuestion`, `AuctionTopic`, `BuzzerQuestion`, `RapidQuestion`, `TransferPuzzle`). Every query refactor must strictly output objects fitting these schemas.
+2. PREVENT REACT STATE INFINITE LOOPS: If you shuffle questions on the client side, ensure the shuffling function runs EXACTLY ONCE inside a controlled `useEffect` hook upon game initialization. Never trigger a shuffle inline during a render cycle or state change, which cause severe rendering crashes.
+3. ISOLATED STATE COPIES: When updating player turns or indexing arrays in Round 4, always map updates to a deep copy of the state array/object to prevent reference-bleeding between Player 1 and Player 2 tracking arrays.
+4. COMPILATION CHECK: Verify the codebase using `npx tsc --noEmit` after changes to guarantee absolute Zero TypeScript errors before asking the user to run tests.

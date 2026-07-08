@@ -1,0 +1,95 @@
+You are an elite Lead Full-Stack Game Developer. We need to implement critical bug fixes for the audio/UI state synchronization and perform a massive database overhaul for Round 3 (Guess the Player). 
+
+Follow these strict instructions to resolve the bugs, inject the verified 2026 data, and perform an anti-crash code audit.
+
+---
+
+### PART 1: AUDIO & UI STATE SYNCHRONIZATION FIXES
+1. **Fix Round 2 (Auction) Timer Tick Sound:** - The `tick.mp3` sound is NOT playing at all during Round 2, and starts late in Round 4. 
+   - **Fix:** Ensure `startTick()` is invoked immediately inside the same `useEffect` or function block that sets `isActive = true` or starts the countdown timer interval. There must be 0ms latency.
+2. **Fix Sound Effects across ALL Rounds:** - `correct.mp3` and `wrong.mp3` only play consistently in Round 1, and fail or disappear in Rounds 2, 3, 4, and 5.
+   - **Fix:** Ensure the `playCorrect()` and `playWrong()` hooks from `useSounds` are correctly wired inside the submission handlers for ALL round screen components (`round2.tsx`, `round3.tsx`, etc.), not just `round1.tsx`.
+3. **Fix Winner Sound & Celebration Logic:**
+   - `fanfare.mp3` and the Winner Celebration Animation do NOT trigger if a player wins directly in normal time. They only trigger if the game goes to the Golden Goal (السؤال الذهبي).
+   - **Fix:** Standardize the win-trigger handler. The celebration animation and `playFanfare()` MUST execute on the final results screen regardless of whether the win happened via normal points or a Golden Goal tiebreaker.
+4. **Fix Leaderboard Name Entry Persistence:**
+   - The Glassmorphic Name-Input UI for the leaderboard only appears after a normal win, but is MISSING if a player wins via the Golden Goal tiebreaker.
+   - **Fix:** Ensure the results screen displays the Name-Entry input field for the winner under both conditions: Direct Win AND Golden Goal Win.
+
+---
+
+### PART 2: ROUND 3 (GUESS THE PLAYER) DATABASE OVERHAUL (UPDATED TO 2026)
+Completely wipe or merge into the existing database for Round 3. Here are 60 meticulously verified players with their complete, real-world career paths updated up to 2026 (from their first professional club to their current 2026 club).
+
+#### 🔵 MEDIUM DIFFICULTY (30 Players - Requires Focus):
+1. **Achraf Hakimi:** Real Madrid -> Borussia Dortmund -> Inter Milan -> Paris Saint-Germain (Current 2026)
+2. **Federico Chiesa:** Fiorentina -> Juventus -> Liverpool (Current 2026)
+3. **Pierre-Emerick Aubameyang:** AC Milan -> Saint-Étienne -> Arsenal -> Barcelona -> Chelsea -> Marseille -> Al-Qadsiah (Current 2026)
+4. **İlkay Gündoğan:** Nürnberg -> Borussia Dortmund -> Manchester City -> Barcelona -> Manchester City (Current 2026)
+5. **Olivier Giroud:** Grenoble -> Tours -> Montpellier -> Arsenal -> Chelsea -> AC Milan -> LAFC (Current 2026)
+6. **João Cancelo:** Benfica -> Valencia -> Inter Milan -> Juventus -> Manchester City -> Bayern Munich -> Barcelona -> Al-Hilal (Current 2026)
+7. **Kai Havertz:** Bayer Leverkusen -> Chelsea -> Arsenal (Current 2026)
+8. **Romelu Lukaku:** Anderlecht -> Chelsea -> West Brom -> Everton -> Manchester United -> Inter Milan -> Chelsea -> AS Roma -> Napoli (Current 2026)
+9. **Julián Álvarez:** River Plate -> Manchester City -> Atlético Madrid (Current 2026)
+10. **Sadio Mané:** Metz -> Red Bull Salzburg -> Southampton -> Liverpool -> Bayern Munich -> Al-Nassr (Current 2026)
+11. **Kalidou Koulibaly:** Metz -> Racing Genk -> Napoli -> Chelsea -> Al-Hilal (Current 2026)
+12. **Hakim Ziyech:** Heerenveen -> Twente -> Ajax -> Chelsea -> Galatasaray (Current 2026)
+13. **Christian Pulisic:** Borussia Dortmund -> Chelsea -> AC Milan (Current 2026)
+14. **Dušan Vlahović:** Partizan -> Fiorentina -> Juventus (Current 2026)
+15. **Raphinha:** Avaí -> Vitória Guimarães -> Sporting CP -> Rennes -> Leeds United -> Barcelona (Current 2026)
+16. **Alexis Sánchez:** Cobreloa -> Udinese -> Barcelona -> Arsenal -> Manchester United -> Inter Milan -> Marseille -> Inter Milan -> Udinese (Current 2026)
+17. **James Rodríguez:** Envigado -> Banfield -> Porto -> Monaco -> Real Madrid -> Bayern Munich -> Everton -> Al-Rayyan -> Olympiacos -> São Paulo -> Rayo Vallecano (Current 2026)
+18. **Ivan Perišić:** Sochaux -> Club Brugge -> Borussia Dortmund -> Wolfsburg -> Inter Milan -> Bayern Munich -> Tottenham -> Hajduk Split -> PSV Eindhoven (Current 2026)
+19. **Memphis Depay:** PSV Eindhoven -> Manchester United -> Lyon -> Barcelona -> Atlético Madrid -> Corinthians (Current 2026)
+20. **Mateo Kovačić:** Dinamo Zagreb -> Inter Milan -> Real Madrid -> Chelsea -> Manchester City (Current 2026)
+21. **Marcelo Brozović:** Hrvatski Dragovoljac -> Lokomotiva -> Dinamo Zagreb -> Inter Milan -> Al-Nassr (Current 2026)
+22. **Aymeric Laporte:** Athletic Bilbao -> Manchester City -> Al-Nassr (Current 2026)
+23. **Georginio Wijnaldum:** Feyenoord -> PSV Eindhoven -> Newcastle -> Liverpool -> Paris Saint-Germain -> AS Roma -> Al-Ettifaq (Current 2026)
+24. **Yassine Bounou:** Wydad AC -> Atlético Madrid -> Real Zaragoza -> Girona -> Sevilla -> Al-Hilal (Current 2026)
+25. **Riyad Mahrez:** Le Havre -> Leicester City -> Manchester City -> Al-Ahli (Current 2026)
+26. **Sergej Milinković-Savić:** Vojvodina -> Genk -> Lazio -> Al-Hilal (Current 2026)
+27. **Edouard Mendy:** Cherbourg -> Reims -> Rennes -> Chelsea -> Al-Ahli (Current 2026)
+28. **N'Golo Kanté:** Boulogne -> Caen -> Leicester City -> Chelsea -> Al-Ittihad (Current 2026)
+29. **Fabinho:** Fluminense -> Rio Ave -> Real Madrid -> Monaco -> Liverpool -> Al-Ittihad (Current 2026)
+30. **Ruben Neves:** Porto -> Wolverhampton -> Al-Hilal (Current 2026)
+
+#### 🔴 HARD DIFFICULTY (30 Players - True Trivia Experts):
+1. **Martin Ødegaard:** Strømsgodset -> Real Madrid -> Heerenveen -> Vitesse -> Real Sociedad -> Arsenal (Current 2026)
+2. **Harry Kane:** Tottenham -> Leyton Orient -> Millwall -> Norwich City -> Leicester City -> Bayern Munich (Current 2026)
+3. **Kylian Mbappé:** Monaco -> Paris Saint-Germain -> Real Madrid (Current 2026)
+4. **Erling Haaland:** Bryne -> Molde -> Red Bull Salzburg -> Borussia Dortmund -> Manchester City (Current 2026)
+5. **Jude Bellingham:** Birmingham City -> Borussia Dortmund -> Real Madrid (Current 2026)
+6. **Antoine Griezmann:** Real Sociedad -> Atlético Madrid -> Barcelona -> Atlético Madrid (Current 2026)
+7. **Robert Lewandowski:** Znicz Pruszków -> Lech Poznań -> Borussia Dortmund -> Bayern Munich -> Barcelona (Current 2026)
+8. **Karim Benzema:** Lyon -> Real Madrid -> Al-Ittihad (Current 2026)
+9. **Luka Modrić:** Dinamo Zagreb -> Zrinjski Mostar -> Inter Zaprešić -> Tottenham -> Real Madrid (Current 2026)
+10. **Toni Kroos:** Bayern Munich -> Bayer Leverkusen -> Real Madrid (Retired / Last Club Real Madrid)
+11. **Cristiano Ronaldo:** Sporting CP -> Manchester United -> Real Madrid -> Juventus -> Manchester United -> Al-Nassr (Current 2026)
+12. **Lionel Messi:** Barcelona -> Paris Saint-Germain -> Inter Miami (Current 2026)
+13. **Neymar Jr:** Santos -> Barcelona -> Paris Saint-Germain -> Al-Hilal (Current 2026)
+14. **Luis Suárez:** Nacional -> Groningen -> Ajax -> Liverpool -> Barcelona -> Atlético Madrid -> Nacional -> Grêmio -> Inter Miami (Current 2026)
+15. **Zlatan Ibrahimović:** Malmö FF -> Ajax -> Juventus -> Inter Milan -> Barcelona -> AC Milan -> Paris Saint-Germain -> Manchester United -> LA Galaxy -> AC Milan (Retired)
+16. **Angel Di María:** Rosario Central -> Benfica -> Real Madrid -> Manchester United -> Paris Saint-Germain -> Juventus -> Benfica (Current 2026)
+17. **Cesc Fàbregas:** Arsenal -> Barcelona -> Chelsea -> Monaco -> Como (Retired)
+18. **Thiago Alcântara:** Barcelona -> Bayern Munich -> Liverpool (Retired)
+19. **Gareth Bale:** Southampton -> Tottenham -> Real Madrid -> Tottenham -> LAFC (Retired)
+20. **Arjen Robben:** Groningen -> PSV Eindhoven -> Chelsea -> Real Madrid -> Bayern Munich -> Groningen (Retired)
+21. **David Alaba:** Austria Wien -> Bayern Munich -> Hoffenheim -> Real Madrid (Current 2026)
+22. **Raheem Sterling:** Liverpool -> Manchester City -> Chelsea -> Arsenal (Current 2026)
+23. **Jadon Sancho:** Manchester City -> Borussia Dortmund -> Manchester United -> Borussia Dortmund -> Chelsea (Current 2026)
+24. **João Félix:** Benfica -> Atlético Madrid -> Chelsea -> Barcelona -> Chelsea (Current 2026)
+25. **Álvaro Morata:** Real Madrid -> Juventus -> Real Madrid -> Chelsea -> Atlético Madrid -> Juventus -> Atlético Madrid -> AC Milan (Current 2026)
+26. **Dani Carvajal:** Real Madrid -> Bayer Leverkusen -> Real Madrid (Current 2026)
+27. **Casemiro:** São Paulo -> Real Madrid -> Porto -> Real Madrid -> Manchester United (Current 2026)
+28. **Raphaël Varane:** Lens -> Real Madrid -> Manchester United -> Como (Retired)
+29. **Keylor Navas:** Saprissa -> Albacete -> Levante -> Real Madrid -> Paris Saint-Germain -> Nottingham Forest -> Paris Saint-Germain (Current 2026)
+30. **Granit Xhaka:** Basel -> Borussia Mönchengladbach -> Arsenal -> Bayer Leverkusen (Current 2026)
+
+---
+
+### 🛠️ PART 3: ARCHITECTURAL SAFETY & COMPULSORY AUDIT
+- Do NOT rewrite or overwrite unrelated files. Ensure that modifications to timers or game contexts use clean state management and avoid triggering continuous renders.
+- Retain the `isLooping: true` or `player.loop = true` syntax for `expo-audio ~1.1.1` to maintain code stability.
+- **Final Command:** Once all features and data are fully integrated, execute a rigorous TypeScript compilation check (`npx tsc --noEmit`) and perform a swift validation audit across all workflows to capture and eliminate any hidden bugs immediately.
+
+Apply these precise fixes and deploy the perfect 100% stable version now!

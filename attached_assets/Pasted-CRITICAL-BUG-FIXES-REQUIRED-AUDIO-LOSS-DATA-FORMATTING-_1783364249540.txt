@@ -1,0 +1,24 @@
+CRITICAL BUG FIXES REQUIRED (AUDIO LOSS & DATA FORMATTING):
+The last database update introduced two major regressions in the codebase. You must fix them immediately following these strict guidelines to ensure 0 crashes.
+
+### 1. RESTORE GLOBAL AUDIO IN ROUNDS 1 TO 4
+- **The Bug:** Sound effects (`playCorrect`, `playWrong`, `startTick`) are currently ONLY working in Round 5. Rounds 1, 2, 3, and 4 are completely silent.
+- **The Fix:** Open `round1.tsx`, `round2.tsx`, `round3.tsx`, and `round4.tsx`. 
+  - Re-import and re-integrate the `useSounds()` hook. 
+  - Ensure `playCorrect()` is called on correct answers.
+  - Ensure `playWrong()` is called on wrong answers or strikes.
+  - Ensure `startTick()` loops correctly when the 30-second timers start in Round 2 (Auction) and Round 4, and stops when the timer ends. 
+  - DO NOT break the existing audio in Round 5.
+
+### 2. ROUND 5 & TIEBREAKER CAREER PATHS (ARABIC + COUNTRY FORMAT)
+- **The Bug:** The career paths injected in the last update for Round 5 and Tiebreaker are in English (e.g., "Everton -> Man Utd"). They MUST be localized to Arabic, and every single club MUST include its country in parentheses.
+- **The Fix:** Go through the entire database array for Round 5 and the Tiebreaker. Translate every club name to Arabic and append the country in parentheses.
+- **Expected Format Example:**
+  - *Wrong (Current):* `Sporting CP -> Man Utd -> Real Madrid -> Juventus -> Al-Nassr`
+  - *Correct (Required):* `سبورتينغ لشبونة (البرتغال) -> مانشستر يونايتد (إنجلترا) -> ريال مدريد (إسبانيا) -> يوفنتوس (إيطاليا) -> النصر (السعودية)`
+- Apply this exact Arabic formatting with `(Country)` to ALL 54 players in Round 5 and the Tiebreaker.
+
+### 💡 ARCHITECTURAL & SAFETY ADVICE FOR THIS FIX:
+- **Targeted Edits Only:** Only edit the `useSounds` hooks in the round screens and the string values inside the database. Do NOT alter any UI rendering logic or database IDs.
+- **Preserve Defensive Code:** Ensure that all components still use Optional Chaining (`?.`) when rendering questions and careers.
+- **Final Validation:** Run a strict TypeScript compilation check (`npx tsc --noEmit`). If there are any missing imports for the audio hooks, fix them instantly before finalizing.

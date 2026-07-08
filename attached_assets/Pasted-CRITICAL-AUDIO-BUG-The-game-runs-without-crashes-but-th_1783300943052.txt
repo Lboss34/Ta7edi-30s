@@ -1,0 +1,26 @@
+CRITICAL AUDIO BUG: The game runs without crashes, but there is ABSOLUTELY NO SOUND OR AUDIO EFFECTS playing in any round. The audio is completely silent.
+
+You must diagnose and fix this immediately. Here are the 4 expected root causes you need to investigate and resolve with guaranteed solutions:
+
+### 1. FILE EXISTENCE & ASSET PATHS (The Audio Files Might Be Missing)
+- **The Issue:** The code in `useSounds.ts` references audio paths (e.g., `require('../assets/sounds/correct.mp3')`), but the actual physical MP3 files might be completely missing from the project directory, or the paths are incorrectly mapped.
+- **The Fix:** Verify if the sound files exist in the file system. If they are missing, write a script or instruct how to create/place placeholder valid audio tracks, and ensure the local `require()` statement maps 100% correctly to the files.
+
+### 2. EXPO ASSET BUNDLING & INITIALIZATION
+- **The Issue:** Expo SDK 54 requires native assets to be properly loaded and bundled. If the `expo-audio` player instances are initialized inside an async function but never pre-loaded or awaited properly, they will fail silently.
+- **The Fix:** Ensure that `useAudioPlayer` or the audio source initialization loads the assets properly before playback is triggered. Ensure the assets are registered correctly in `app.json` under expo assets if required.
+
+### 3. THE SILENT TRY/CATCH BLOCK (Errors Are Being Swallowed)
+- **The Issue:** In the previous update, you wrapped the code in `try/catch` blocks to prevent crashes. Right now, it is catching an error silently (e.g., inside the `catch` block you have an empty statement or just a log), which bypasses the red screen but swallows the audio completely.
+- **The Fix:** Add clear `console.warn("Audio Error:", error)` inside every single catch block so I can see what is breaking in my terminal logs. Fix the underlying error that is forcing the code into the catch block.
+
+### 4. MUTE STATE LOGIC CONFLICT
+- **The Issue:** The `isMuted` global state might be defaulting to `true` upon initialization, or the conditional checks before running `.play()` are blocking the audio execution due to a reversed state check.
+- **The Fix:** Verify that `isMuted` defaults to `false`. Ensure the playback triggers strictly evaluate the condition before playing (e.g., `if (!isMuted) player.play()`).
+
+---
+### 🛠️ CODE INTEGRITY & ANTI-CRASH RULES:
+- Ensure that fixing the audio does NOT re-introduce the "4 arguments but 3 expected" constructor crash. Keep the `expo-audio` signature strictly aligned to version ~1.1.1 (3 arguments maximum).
+- Do not rewrite the UI components or touch the question database. Focus strictly on fixing the execution inside `useSounds.ts` and the round handlers.
+
+Output the verified, 100% working audio code now!

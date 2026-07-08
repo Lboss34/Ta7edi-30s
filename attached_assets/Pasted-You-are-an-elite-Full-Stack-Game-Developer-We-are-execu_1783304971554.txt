@@ -1,0 +1,27 @@
+You are an elite Full-Stack Game Developer. We are executing a massive dual-feature upgrade: "The Real Audio & Persistent Leaderboard Update". 
+
+I have manually uploaded 5 real, high-quality MP3 files into the `assets/sounds/` directory. Stop using any synthetic or wave-generated audio.
+
+---
+
+### PART 1: REAL AUDIO INTEGRATION & TIMERS LOOPING
+Please strictly link and configure the 5 uploaded files inside `useSounds.ts` using `expo-audio` (~1.1.1):
+
+1. `click.mp3` -> Connect this as a premium UI click sound. Trigger it on EVERY single button press in the Main Menu, Setup, Difficulty Selection, and Round Navigation.
+2. `correct.mp3` -> Play this whenever a player answers correctly in Round 1, Round 3, and Round 4.
+3. `wrong.mp3` -> Play this for wrong answers and whenever a Strike ❌ is triggered in any round.
+4. `fanfare.mp3` -> Play this epic crowd cheering and stadium applause sound on the final Results/Winner screen.
+5. `tick.mp3` -> **CRITICAL TIMER LOGIC:** This file is only 7 seconds long, but our Auction (Round 2) and 30-Second Challenge (Round 4) timers run for 30 seconds. 
+   - You MUST explicitly enable the looping property (`isLooping: true` or `shouldLoop: true`) on the `tick` player instance.
+   - **Sync Rule:** The looping tick sound MUST start exactly when the 30-second countdown begins, and it MUST stop completely and instantly the exact moment the timer hits 0 or the round ends.
+
+---
+
+### PART 2: PERSISTENT LEADERBOARD SYSTEM (KING OF THE THRONE)
+Implement a flawless ranking system using `AsyncStorage` to save top scores across game sessions:
+
+1. **Score Saving Logic:** At the end of the game on the `results.tsx` screen, if a player wins, prompt them with a premium glassmorphic Input Field to enter their name. Save an object containing: `playerName`, `totalScore`, and the current `timestamp`.
+2. **Data Ranking Rules:** Store only the Top 10 highest scores. Automatically sort the array from highest to lowest when saving, slice it to the top 10, and overwrite it safely inside `AsyncStorage`. Wrap all getItem/setItem tasks in strict try/catch blocks.
+3. **Premium Leaderboard UI Screen:** Create a beautiful, futuristic "Leaderboard" screen accessible via a button from the Main Menu. Designed with our signature Dark/Neon style, displaying a glowing table with ranks (1st to 10th with custom badges for top 3), names, scores, and dates. If the database is empty, show an elegant fallback layout: "No records yet! Claim the throne by winning your first match."
+
+Ensure absolute compile safety, handle all async tasks gracefully, and rewrite the updated audio files, state context, and layout screens immediately without further approval!

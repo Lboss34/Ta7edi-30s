@@ -1,0 +1,80 @@
+CRITICAL DATABASE OVERHAUL (V6.0 - PART 3 - FINAL):
+You are an Elite Game Data Engineer. We are deploying the final piece of the 2026 database update: **Round 5 (Guess the Player / خمن اللاعب)** and the **Tiebreaker (السؤال الذهبي)**.
+
+### ⚙️ MECHANICS & RULES:
+1. **No Duplicates Guarantee:** Completely REPLACE the existing arrays/data for Round 5 and the Tiebreaker with this newly provided list. This guarantees zero ID conflicts with previous test data.
+2. **Data Structure:** - Each entry MUST follow: `{ id: string, career: string, answer: string }`
+3. **2026 Accuracy:** All transfers are accurate to 2026. Use exactly the strings provided below.
+
+---
+### 📥 DATA TO INJECT FOR ROUND 5 (خمن اللاعب) - COMPLETELY NEW PLAYERS:
+
+#### 🟢 EASY (12 Players):
+1. { id: "r5_e1", career: "Gremio -> PSG -> Barcelona -> AC Milan -> Flamengo -> Atletico Mineiro -> Queretaro -> Fluminense", answer: "رونالدينيو" }
+2. { id: "r5_e2", career: "Everton -> Man Utd -> Everton -> DC United -> Derby County", answer: "واين روني" }
+3. { id: "r5_e3", career: "Parma -> Juventus -> PSG -> Juventus -> Parma", answer: "جانلويجي بوفون" }
+4. { id: "r5_e4", career: "Barcelona -> Vissel Kobe -> Emirates Club", answer: "أندريس إنييستا" }
+5. { id: "r5_e5", career: "Sevilla -> Real Madrid -> PSG -> Sevilla", answer: "سيرخيو راموس" }
+6. { id: "r5_e6", career: "Man Utd -> Real Zaragoza -> Barcelona", answer: "جيرارد بيكيه" }
+7. { id: "r5_e7", career: "Monaco -> Juventus -> Arsenal -> Barcelona -> NY Red Bulls", answer: "تيري هنري" }
+8. { id: "r5_e8", career: "Instituto -> Palermo -> Juventus -> Roma", answer: "باولو ديبالا" }
+9. { id: "r5_e9", career: "Man Utd -> Juventus -> Man Utd -> Juventus", answer: "بول بوغبا" }
+10. { id: "r5_e10", career: "Independiente -> Atletico Madrid -> Man City -> Barcelona", answer: "سيرخيو أجويرو" }
+11. { id: "r5_e11", career: "Real Madrid -> Porto", answer: "إيكر كاسياس" }
+12. { id: "r5_e12", career: "Barcelona -> Al Sadd", answer: "تشافي هيرنانديز" }
+
+#### 🟡 MEDIUM (12 Players):
+1. { id: "r5_m1", career: "Basel -> Schalke -> Sevilla -> Barcelona -> Sevilla -> Al Shabab -> Hajduk Split", answer: "إيفان راكيتيتش" }
+2. { id: "r5_m2", career: "Arsenal -> Oxford -> Sheff Wed -> Rotherham -> Wolves -> Getafe -> Reading -> Aston Villa", answer: "إيميليانو مارتينيز" }
+3. { id: "r5_m3", career: "Ajax -> Tottenham -> Inter Milan -> Brentford -> Man Utd", answer: "كريستيان إريكسن" }
+4. { id: "r5_m4", career: "Danubio -> Palermo -> Napoli -> PSG -> Man Utd -> Valencia -> Boca Juniors", answer: "إدينسون كافاني" }
+5. { id: "r5_m5", career: "RS Futebol -> Juventude -> Porto -> Dynamo Moscow -> Fluminense -> AC Milan -> PSG -> Chelsea -> Fluminense", answer: "تياغو سيلفا" }
+6. { id: "r5_m6", career: "Colo-Colo -> Leverkusen -> Juventus -> Bayern Munich -> Barcelona -> Inter Milan -> Flamengo -> Athletico Paranaense -> Colo-Colo", answer: "أرتورو فيدال" }
+7. { id: "r5_m7", career: "River Plate -> Porto -> Atletico Madrid -> Monaco -> Man Utd -> Chelsea -> Galatasaray -> Rayo Vallecano -> Millonarios", answer: "راداميل فالكاو" }
+8. { id: "r5_m8", career: "Maritimo -> Porto -> Real Madrid -> Besiktas -> Porto", answer: "بيبي" }
+9. { id: "r5_m9", career: "Figueirense -> Hoffenheim -> Liverpool -> Al-Ahli", answer: "روبرتو فيرمينو" }
+10. { id: "r5_m10", career: "Bahia -> Sevilla -> Barcelona -> Juventus -> PSG -> Sao Paulo -> Barcelona -> UNAM", answer: "داني ألفيس" }
+11. { id: "r5_m11", career: "Schalke -> Werder Bremen -> Real Madrid -> Arsenal -> Fenerbahce -> Istanbul Basaksehir", answer: "مسعود أوزيل" }
+12. { id: "r5_m12", career: "Atletico Madrid -> Man Utd -> Fiorentina", answer: "دافيد دي خيا" }
+
+#### 🔴 HARD (12 Players) - Cult Heroes & Obscure Paths:
+1. { id: "r5_h1", career: "PSG -> Arsenal -> Real Madrid -> PSG -> Liverpool -> Man City -> Fenerbahce -> Bolton -> Chelsea -> Shanghai Shenhua -> Juventus -> West Brom -> Mumbai City", answer: "نيكولا أنيلكا" }
+2. { id: "r5_h2", career: "Hertha -> Tottenham -> Dortmund -> Portsmouth -> AC Milan -> Schalke -> Las Palmas -> Frankfurt -> Sassuolo -> Barcelona -> Fiorentina -> Besiktas -> Monza -> Hertha", answer: "كيفين برينس بواتينغ" }
+3. { id: "r5_h3", career: "Lumezzane -> Inter -> Man City -> AC Milan -> Liverpool -> Nice -> Marseille -> Brescia -> Monza -> Adana Demirspor -> Sion -> Adana Demirspor", answer: "ماريو بالوتيلي" }
+4. { id: "r5_h4", career: "Sporting -> Barcelona -> Porto -> Inter -> Chelsea -> Besiktas -> Al Ahli -> Porto -> Besiktas -> Kasimpasa -> Vitoria Guimaraes", answer: "ريكاردو كواريسما" }
+5. { id: "r5_h5", career: "Internacional -> AC Milan -> Corinthians -> Sao Paulo -> Chelsea -> Villarreal -> Tianjin Tianhai -> Sao Paulo -> Orlando City -> Sao Paulo", answer: "ألكسندر باتو" }
+6. { id: "r5_h6", career: "Lyon -> Marseille -> Newcastle -> Hull City -> Nice -> PSG -> Rennes -> Valladolid -> Bordeaux -> Lille", answer: "حاتم بن عرفة" }
+7. { id: "r5_h7", career: "Lens -> Tottenham -> QPR -> Fulham -> AC Milan -> Benfica -> Genoa -> Al-Nasr", answer: "عادل تاعرابت" }
+8. { id: "r5_h8", career: "Chivas -> Man Utd -> Real Madrid -> Leverkusen -> West Ham -> Sevilla -> LA Galaxy -> Chivas", answer: "تشيتشاريتو (خافيير هيرنانديز)" }
+9. { id: "r5_h9", career: "Bastia -> Arsenal -> Charlton -> Barcelona -> West Ham -> Rubin Kazan -> Sion -> Arta/Solar7", answer: "أليكس سونغ" }
+10. { id: "r5_h10", career: "Lyn -> Chelsea -> Tianjin TEDA -> Middlesbrough -> Trabzonspor -> Kuwait SC", answer: "جون أوبي ميكيل" }
+11. { id: "r5_h11", career: "Hamburg -> Nuremberg -> Mainz -> Schalke -> Stoke City -> PSG -> Bayern Munich", answer: "إريك ماكسيم تشوبو موتينغ" }
+12. { id: "r5_h12", career: "Esbjerg -> Toulouse -> Middlesbrough -> Bordeaux -> Leganes -> Barcelona -> Espanyol -> Gremio", answer: "مارتين برايثوايت" }
+
+---
+### 🏆 TIEBREAKER POOL (السؤال الذهبي) - 18 PLAYERS (MEDIUM/HARD):
+*Rule: These players are to be exclusively used in the `tiebreaker.tsx` logic when a game ends in a draw.*
+1. { id: "tb_1", career: "Juventus -> Siena -> Grosseto -> Pescara -> Genoa -> Torino -> Dortmund -> Sevilla -> Torino -> Lazio -> Besiktas", answer: "تشيرو إيموبيلي" }
+2. { id: "tb_2", career: "Zeljeznicar -> Teplice -> Usti nad Labem -> Wolfsburg -> Man City -> Roma -> Inter -> Fenerbahce", answer: "إدين دجيكو" }
+3. { id: "tb_3", career: "Pyunik -> Metalurh Donetsk -> Shakhtar -> Dortmund -> Man Utd -> Arsenal -> Roma -> Inter", answer: "هنريك مخيتاريان" }
+4. { id: "tb_4", career: "Basel -> Bayern Munich -> Inter -> Stoke City -> Liverpool -> Lyon -> Chicago Fire -> Basel", answer: "شيردان شاكيري" }
+5. { id: "tb_5", career: "Metz -> Lyon -> Roma -> Juventus -> Barcelona -> Besiktas -> Sharjah -> CSKA Moscow", answer: "ميراليم بيانيتش" }
+6. { id: "tb_6", career: "Bayern Munich -> Dortmund -> Bayern Munich -> Dortmund -> Roma", answer: "ماتس هوملز" }
+7. { id: "tb_7", career: "Gremio -> Shakhtar -> Bayern Munich -> Juventus -> Bayern Munich -> Gremio -> LA Galaxy -> Fluminense -> Sydney FC", answer: "دوغلاس كوستا" }
+8. { id: "tb_8", career: "Vasco da Gama -> Inter -> Espanyol -> Liverpool -> Barcelona -> Bayern Munich -> Aston Villa -> Al-Duhail -> Vasco da Gama", answer: "فيليبي كوتينيو" }
+9. { id: "tb_9", career: "Real Madrid -> Bolton -> Fiorentina -> Sunderland -> Chelsea -> Barcelona -> Celta Vigo", answer: "ماركوس ألونسو" }
+10. { id: "tb_10", career: "Arsenal -> Brentford -> Roma -> Juventus -> Barcelona", answer: "فويتشيك تشيزني" }
+11. { id: "tb_11", career: "Rot Weiss Ahlen -> Monchengladbach -> Dortmund -> LA Galaxy", answer: "ماركو رويس" }
+12. { id: "tb_12", career: "Osasuna -> Dortmund -> Newcastle -> Real Sociedad -> Arsenal", answer: "ميكل ميرينو" }
+13. { id: "tb_13", career: "Chelsea -> Charlton -> Swansea -> West Brom -> Crystal Palace -> Chelsea -> Atletico Madrid", answer: "كونور غالاغير" }
+14. { id: "tb_14", career: "Real Madrid -> Al-Qadsiah", answer: "ناتشو فيرنانديز" }
+15. { id: "tb_15", career: "Dinamo Zagreb -> RB Leipzig -> Barcelona", answer: "داني أولمو" }
+16. { id: "tb_16", career: "Atletico Mineiro -> Troyes -> PSV -> Girona -> Man City", answer: "سافينيو" }
+17. { id: "tb_17", career: "Bayern Munich -> Parma -> Anderlecht -> Bologna -> Man Utd", answer: "جوشوا زيركزي" }
+18. { id: "tb_18", career: "Lille -> Man Utd", answer: "ليني يورو" }
+
+---
+### 🛠️ FINAL IMPLEMENTATION & SAFETY CHECK:
+- Inject these directly into the application state/database for Round 5 and Tiebreaker.
+- Ensure strict TypeScript adherence (`npx tsc --noEmit`) to confirm no mapping issues. 
+- Ensure `Optional Chaining` is applied to all player properties in the UI to guarantee a 100% crash-free experience.

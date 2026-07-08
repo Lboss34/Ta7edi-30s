@@ -1,0 +1,47 @@
+You are an elite Full-Stack Game Developer. The game is already legendary, but now we are pushing the "V3.0 Ultimate Realism & Mechanics Update". 
+
+IMPORTANT CONTEXT: The current year is 2026. All football data, especially player transfers, must be completely up-to-date as of 2026 (e.g., Kevin De Bruyne is now at Napoli).
+
+DO NOT rewrite the entire application or break the premium UI. Integrate these massive updates directly into the existing React state machine. Read the strict requirements below and START CODING IMMEDIATELY.
+
+---
+
+### PHASE 1: MASSIVE DATABASE EXPANSION & DIFFICULTY SYNC
+1. **Total Data Overhaul:** Multiply the size of the JSON question bank by 10. Inject HUNDREDS of new, non-repeating questions across all rounds.
+2. **Strict Difficulty Sync:** Ensure EVERY round strictly fetches questions matching the global difficulty selected at the start (Easy, Medium, Hard). 
+   - *Medium Rule:* Medium questions should feature well-known, but not overly obvious facts/players.
+
+### PHASE 2: ROUND 1 OVERHAUL - "THE STRIKE SYSTEM" (ماذا تعرف)
+We are completely changing Round 1 from single-answer to a "Multi-Answer Ping-Pong" mechanic.
+- **Data Structure:** Questions must now have an array of valid answers (e.g., "Name players who played for both Real Madrid and Chelsea", with an array of 20 valid names).
+- **Mechanics:** - The question is presented to BOTH players. They take turns answering (Ping-Pong style: P1 -> P2 -> P1...).
+  - **The Strike System:** Each player has a limit of 3 Strikes. If a player gives a wrong answer, they get 1 Strike, and the turn passes to the opponent. If a player reaches 3 Strikes (3 red X's), the other player wins the point.
+  - **The "Pass" System:** Each player has exactly ONE "Pass" (سكيب) per question to skip their turn without getting a strike.
+- **Host UI Implementation:**
+  - The Host MUST see a scrollable list of ALL valid answers below the question.
+  - **Player Status:** Display [Player 1 Name] and [Player 2 Name]. Below each name, render three gray 'X' icons (❌❌❌). When a strike is given, change the respective 'X' to Red.
+  - **Controls:** For the active player's turn, the Host sees 3 buttons: [Correct (✓)], [Wrong (X) -> adds strike], and a central [Pass] button. 
+  - *Dev Note:* Disable the [Pass] button for a player if they have already used it during this question. Automatically switch `currentTurn` state after any button click.
+
+### PHASE 3: "GUESS THE PLAYER" (TRANSFERS) - VISUAL & DATA FIXES
+1. **2026 Accuracy & Path Correction:** Fix all transfer paths to be 100% accurate up to 2026. Remove any wrong early-career clubs.
+2. **Country Tags:** Append the country of the club in Arabic parentheses. Example: كومو (الإيطالي).
+3. **RTL Fix (Crucial):** Render the transfer path from RIGHT to LEFT. 
+   - *Example:* بنزيما : الاتحاد (السعودي) <- ريال مدريد (الإسباني) <- أولمبيك ليون (الفرنسي). 
+   - *Dev Note:* Use `flex-row-reverse` or reverse the array mapping so the visual arrows (`<-`) and text flow naturally in Arabic RTL.
+4. **Club Logos Integration:**
+   - Display the club's logo next to its name.
+   - *Dev Note (Error Handling):* Create a `<ClubBadge />` component. Use a reliable public CDN for football logos. IMPORTANT: You MUST implement an `onError` fallback in the `<img>` tag. If the logo URL fails to load, fallback gracefully to a premium Neon Circle containing the first letter of the club's name, so the UI NEVER breaks.
+
+### PHASE 4: "30-SECOND CHALLENGE" REFINEMENT
+1. **Deduplication:** Ensure questions pulled here are deeply filtered to NEVER repeat questions from Round 1 or 2. 
+2. **Clarity:** Questions must be short, punchy, and instantly understandable for a rapid-fire round.
+
+---
+### 🛠️ SELF-CORRECTION & EXECUTION RULES (DO NOT SKIP):
+Before finalizing the code output, run a silent internal check:
+- Is the State Machine for the "Strike System" isolated per question? (Strikes and Passes must reset when moving to the next question).
+- Is `currentTurn` toggling correctly without infinite re-renders?
+- Are the logos wrapped in a fallback component to prevent broken images?
+
+Output the updated components immediately. Start with the New Database Schema, then the Round 1 Strike System Component, then the Guess the Player fixes!

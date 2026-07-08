@@ -1,0 +1,23 @@
+You are an elite Full-Stack Game Developer. We need to implement a final architectural update combining sound synchronization fixes with a new endless "Skip" feature for the Golden Goal Tiebreaker.
+
+### 1. NEW FEATURE: INFINITE SKIP IN TIEBREAKER (`tiebreaker.tsx`)
+- **The Mechanic:** If neither player knows the answer to the Golden Goal question, they need a way to skip it.
+- **The Implementation:** * Add a premium neon button labeled "تخطي اللاعب" (Skip Player) on the Tiebreaker screen.
+  * When tapped, this button must randomly select a NEW unique player from the 18-player tiebreaker pool, reset the text input fields, and refresh the screen with the new career path.
+  * This Skip button must remain active and INFINITE—it should never lock or close until one of the players finally guesses the correct answer to win the game.
+
+### 2. FIX THE WINNER FANFARE (`fanfare.mp3`)
+- **The Bug:** The victory fanfare sound does NOT trigger when a player wins, whether via normal time or after the Tiebreaker.
+- **The Fix:** Open `results.tsx`. Inside the primary layout or the main `useEffect` that initializes the results screen, explicitly call `playFanfare()` so it fires immediately upon entering the screen, completely unconditional.
+
+### 3. FIX THE TIMER TICKING (`tick.mp3`) IN ROUND 2 & ROUND 4
+- **The Bug:** The ticking clock sound for the 30-second countdown in Round 2 (The Auction) and Round 4 (30-Second Challenge) is completely silent.
+- **The Fix:** Open `round2.tsx` and `round4.tsx`. Locate the exact state handler or interval where the countdown begins (`isActive === true`).
+  * Inject `startTick()` at the exact millimeter the countdown initiates.
+  * Explicitly call `stopTick()` when the timer hits 0, when a player submits an answer early, or when the screen changes.
+
+---
+### 💡 STRICT SAFETY & COMPILATION RULES:
+- Ensure `player.loop = true` is strictly applied to the `tick` player instance to handle the 7-second file loop over the 30-second countdown.
+- Do NOT rewrite any text data or database content. Focus strictly on these sound triggers and the tiebreaker skip logic.
+- Run a compulsory TypeScript check (`npx tsc --noEmit`) to guarantee 0 compilation or layout bugs before deploying the stable build!

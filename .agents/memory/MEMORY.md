@@ -1,0 +1,3 @@
+- [تحدي الثلاثين game structure](thirty-challenge-game.md) — Expo mobile game; 5 rounds; linear Stack navigator (no tabs); GameProvider in _layout.tsx
+- [V3.0 Round 1 Strike System](round1-strike-system.md) — Round 1 completely rewritten as PingPong multi-answer; GameContext uses pingPongQuestions not questionSet
+- [expo-audio migration](expo-audio-migration.md) — expo-av removed (deprecated in SDK 54); use expo-audio with useAudioPlayer hook
