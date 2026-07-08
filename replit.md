@@ -4,17 +4,17 @@ A mobile trivia/competition game built with Expo (React Native), featuring 5 gam
 
 ## Run & Operate
 
-- Two dev workflows are configured and running:
-  - **API Server** — `PORT=8080 pnpm --filter @workspace/api-server run dev`
-  - **Mobile (Expo)** — `PORT=18115 BASE_PATH=/ pnpm --filter @workspace/mobile run dev`
-- `pnpm --filter @workspace/api-server run dev` — run the API server manually (port is env-driven via `PORT`, defaults to 8080)
+- Configured workflows:
+  - **API Server** (`artifacts/api-server: API Server`) — `PORT=8080 pnpm --filter @workspace/api-server run dev`
+  - **Mobile (Expo)** (`artifacts/mobile: expo`) — must be started from replit.com (not the iOS app); command: `PORT=18115 BASE_PATH=/ pnpm --filter @workspace/mobile run dev`
+- `pnpm --filter @workspace/api-server run dev` — run the API server manually (port is env-driven via `PORT`, no default)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — Postgres connection string (used by `lib/db` Drizzle setup)
 - Required env: `PORT` — port for API server (injected automatically by Replit; required, no default fallback in code)
-- Optional env: `MONGODB_URI` — MongoDB connection string; if unset, questions API is disabled and app uses local fallback data
+- Required env: `MONGODB_URI` — MongoDB connection string; questions are served from MongoDB collections (`round1_questions`, etc.); if unset, questions API is disabled and the mobile app falls back to local data
 
 ## Stack
 
