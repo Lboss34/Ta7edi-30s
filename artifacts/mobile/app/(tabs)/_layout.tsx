@@ -13,6 +13,13 @@ export default function GameLayout() {
       <Stack.Screen name="tiebreaker" />
       <Stack.Screen name="results" />
       <Stack.Screen name="leaderboard" />
+      <Stack.Screen name="mp-game" />
+      <Stack.Screen name="mp-round1" />
+      <Stack.Screen name="mp-round2" />
+      <Stack.Screen name="mp-round3" />
+      <Stack.Screen name="mp-round5" />
+      <Stack.Screen name="mp-results" />
+      <Stack.Screen name="mp-tiebreaker" />
     </Stack>
   );
 }
