@@ -36,7 +36,9 @@ _Describe the high-level user-facing capabilities of this app once they exist._
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- **اللغة**: التواصل دائماً باللغة العربية بين المستخدم والـ Agent.
+- **هوية اللعبة**: اللعبة هي "تحدي الثلاثين" المشهورة على يوتيوب من تقديم مساعد الفوزان — كل واجهات اللعبة باللغة العربية.
+- **لا تعديلات كبيرة**: تجنّب إعادة هيكلة المشروع أو تغيير الـ stack — فقط تعديلات خفيفة وإضافات مدروسة.
 
 ## Gotchas
 

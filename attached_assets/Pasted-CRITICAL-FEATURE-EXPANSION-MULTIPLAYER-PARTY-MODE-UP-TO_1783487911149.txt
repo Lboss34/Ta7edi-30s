@@ -1,0 +1,34 @@
+CRITICAL FEATURE EXPANSION: MULTIPLAYER PARTY MODE (UP TO 5 PLAYERS) + CLOUD LEADERBOARD + FLAWLESS AUDIO INTEGRATION
+
+Please implement a new optional "Multiplayer Party Mode" supporting up to 5 players (1vs1vs1vs1vs1) where the device holder acts as the Host/Referee. This mode must reuse our existing database collections, questions, and difficulties, but adapt the round rules and integrate the existing 1vs1 Sound Effects (SFX) flawlessly.
+
+Read the architectural and audio safeguards at the end BEFORE writing any code.
+
+⚠️ 1. ROUND-BY-ROUND LOGIC FOR MULTIPLAYER MODE:
+
+- ROUND 1 (What Do You Know): Round-robin rotation (Player 1 -> Player 2...). Each player gets up to 3 Strikes. Incorrect answer = 1 Strike. Play continues until answers are exhausted. Players with the absolute lowest number of strikes win the round points.
+- ROUND 2 (The Auction): Sequential open bidding. Player 1 bids, Player 2 raises or says "Pass". Passing eliminates them from the current topic's auction. The last remaining player must fulfill their bid to win points.
+- ROUND 3 (The Buzzer): Host reads the question. First player to verbally call out gets the turn (host selects them). If they answer incorrectly, they are barred from re-answering. The remaining players can attempt to steal. Add a "Burn Question" (سؤال محروق) skip button if no one knows the answer.
+- ROUND 4 (30-Seconds Challenge): SKIP ENTIRELY for Multiplayer mode. (Ensure it remains fully intact for standard 1vs1 mode).
+- ROUND 5 (Guess the Player): Host reads the full transfer history block out loud at once. Unlimited guessing attempts for everyone. First player to shout the correct answer gets the point.
+- TIEBREAKER (The Golden Question): If the game ends and multiple players are tied for 1st place (with scores strictly higher than the rest), push ALL tied players into the Tiebreaker simultaneously. Host reads a new transfer puzzle (+5% difficulty). First to yell the correct answer wins the entire game. Include a "Change Player" bypass button.
+
+🏆 2. CLOUD LEADERBOARD INTEGRATION:
+- At the final victory screen, display a "Save Winner to Leaderboard" button.
+- Prompt the host to confirm the winner's name and smoothly dispatch the score data to the MongoDB Atlas leaderboard collection.
+- UPSERT LOGIC: If the player's name exists, ONLY update the record if the current session's score beats their historical `HighScore`.
+
+🔊 3. FLAWLESS AUDIO INTEGRATION (REUSING 1VS1 SFX):
+The existing 1vs1 sound effects must be imported and triggered in the Multiplayer Mode precisely at these events:
+- Correct Answer -> Trigger "Ding/Success" SFX.
+- Incorrect Answer / Strike -> Trigger "Buzzer/Fail" SFX.
+- Round Start / Transition -> Trigger "Round Intro/Swoosh" SFX.
+- Victory / Leaderboard Save -> Trigger "Winner/Celebration" SFX.
+
+⚙️ 4. STRICT ARCHITECTURAL & ANTI-BUG SAFEGUARDS (MUST FOLLOW):
+
+- AUDIO MEMORY LEAKS (EXPO-AV): Do NOT trigger sounds directly without properly handling the promise. You MUST pre-load the audio assets (or use an existing audio context/hook) and ALWAYS call `sound.unloadAsync()` when the component unmounts or the sound finishes playing. Failure to unload sounds will cause severe memory leaks and app crashes.
+- OVERLAPPING AUDIO: If the host clicks "Correct" rapidly, ensure the previous success sound is either stopped before playing again, or instantiated correctly so it doesn't cause a Promise rejection error.
+- STATE ISOLATION: Ensure the Multiplayer player arrays (`strikes`, `scores`, `activeTurns`) are completely isolated. Use deep copies `[...state]` when updating player points to prevent React state mutation bugs.
+- LEADERBOARD ASYNC HANDLING: Wrap the MongoDB leaderboard push in a `try...catch` block. Show a subtle loading indicator (or disable the button) while saving to prevent the host from spam-clicking and sending duplicate records.
+- ZERO-ERROR COMPILATION: Run `npx tsc --noEmit` before concluding to ensure absolute TypeScript interface safety for the new `MultiplayerState` variables.
