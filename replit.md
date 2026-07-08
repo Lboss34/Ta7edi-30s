@@ -4,7 +4,10 @@ A mobile trivia/competition game built with Expo (React Native), featuring 5 gam
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port is env-driven via `PORT`, defaults to 8080)
+- Two dev workflows are configured and running:
+  - **API Server** — `PORT=8080 pnpm --filter @workspace/api-server run dev`
+  - **Mobile (Expo)** — `PORT=18115 BASE_PATH=/ pnpm --filter @workspace/mobile run dev`
+- `pnpm --filter @workspace/api-server run dev` — run the API server manually (port is env-driven via `PORT`, defaults to 8080)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
