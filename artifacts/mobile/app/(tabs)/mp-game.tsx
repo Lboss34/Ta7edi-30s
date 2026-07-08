@@ -7,7 +7,7 @@ import { useColors } from '@/hooks/useColors';
 import { useMultiplayer, PLAYER_COLORS } from '@/contexts/MultiplayerContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useSounds } from '@/hooks/useSounds';
+import { useGroupSounds } from '@/hooks/useGroupSounds';
 
 const MP_ROUNDS = [
   { num: 1, title: 'ماذا تعرف',   desc: 'دور بدوري بين اللاعبين\n٣ إنذارات لكل لاعب — الأقل إنذاراً يفوز',       color: '#7B2FFF', route: '/mp-round1' as const },
@@ -29,7 +29,7 @@ export default function MpGameHub() {
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const { state, toggleMute } = useMultiplayer();
-  const { playClick } = useSounds(state.isMuted);
+  const { playClick } = useGroupSounds(state.isMuted);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;

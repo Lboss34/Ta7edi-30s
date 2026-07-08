@@ -17,7 +17,7 @@ import { useColors } from '@/hooks/useColors';
 import { useMultiplayer, PLAYER_COLORS } from '@/contexts/MultiplayerContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useSounds } from '@/hooks/useSounds';
+import { useGroupSounds } from '@/hooks/useGroupSounds';
 import { addLeaderboardEntry } from '@/lib/leaderboard';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -98,7 +98,7 @@ export default function MpTiebreakerScreen() {
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const { state, addScore, resetGame } = useMultiplayer();
-  const { playCorrect, playWrong, playFanfare } = useSounds(state.isMuted);
+  const { playCorrect, playWrong, playFanfare } = useGroupSounds(state.isMuted);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;

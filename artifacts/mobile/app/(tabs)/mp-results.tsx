@@ -14,7 +14,7 @@ import { useColors } from '@/hooks/useColors';
 import { useMultiplayer, PLAYER_COLORS } from '@/contexts/MultiplayerContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useSounds } from '@/hooks/useSounds';
+import { useGroupSounds } from '@/hooks/useGroupSounds';
 import { addLeaderboardEntry } from '@/lib/leaderboard';
 
 export default function MpResultsScreen() {
@@ -22,7 +22,7 @@ export default function MpResultsScreen() {
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const { state, resetGame } = useMultiplayer();
-  const { playFanfare } = useSounds(state.isMuted);
+  const { playFanfare } = useGroupSounds(state.isMuted);
 
   const playFanfareRef = useRef(playFanfare);
   playFanfareRef.current = playFanfare;

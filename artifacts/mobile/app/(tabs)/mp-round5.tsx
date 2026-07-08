@@ -6,8 +6,11 @@
  * - Unlimited guessing attempts for everyone simultaneously.
  * - First player to shout the correct answer gets the point.
  * - Host selects which player answered correctly.
+ * - Any player may request to "skip" the current puzzle: it is not discarded — it is
+ *   requeued to the end of the round's puzzle order and a new puzzle is shown immediately.
+ *   This keeps the total puzzle count stable and lets the skipped puzzle resurface later.
  */
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +19,7 @@ import { useColors } from '@/hooks/useColors';
 import { useMultiplayer, PLAYER_COLORS } from '@/contexts/MultiplayerContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useSounds } from '@/hooks/useSounds';
+import { useGroupSounds } from '@/hooks/useGroupSounds';
 
 const LETTER_COLORS: Record<string, string> = {
   'ر': '#7B2FFF', 'ب': '#FF3B3B', 'م': '#00E5FF', 'ل': '#FF6B00',
@@ -56,20 +59,31 @@ export default function MpRound5Screen() {
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const { state, addScore, nextRound } = useMultiplayer();
-  const { playCorrect, playFanfare } = useSounds(state.isMuted);
+  const { playClick, playCorrect, playFanfare } = useGroupSounds(state.isMuted);
 
   const puzzles = state.transferPuzzles;
   const n       = state.players.length;
 
   const [phase, setPhase]             = useState<Phase>('intro');
-  const [puzzleIdx, setPuzzleIdx]     = useState(0);
+  // Queue of puzzle indices for this round. Skipping moves the front index to the
+  // back instead of removing it, so the same puzzle is asked again later.
+  const [queue, setQueue]             = useState<number[]>(() => puzzles.map((_, i) => i));
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  const puzzle = puzzles[puzzleIdx];
+  const puzzleIdx = puzzles.length - queue.length; // how many puzzles already resolved
+  const puzzle = puzzles[queue[0]];
   const displayChain = puzzle?.transfers ? [...puzzle.transfers].reverse() : [];
+  const isLastInQueue = queue.length <= 1;
+
+  const handleSkip = useCallback(() => {
+    if (queue.length <= 1) return; // nothing else to show instead
+    playClick();
+    Haptics.selectionAsync();
+    setQueue(q => [...q.slice(1), q[0]]);
+  }, [queue.length, playClick]);
 
   const handlePlayerGuessed = (playerIdx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -95,11 +109,12 @@ export default function MpRound5Screen() {
 
   const handleNextPuzzle = () => {
     setSelectedPlayer(null);
-    if (puzzleIdx >= puzzles.length - 1) {
+    if (isLastInQueue) {
+      setQueue([]);
       playFanfare();
       setPhase('round_done');
     } else {
-      setPuzzleIdx(i => i + 1);
+      setQueue(q => q.slice(1));
       setPhase('playing');
     }
   };
@@ -194,15 +209,15 @@ export default function MpRound5Screen() {
           <Text style={[S.qProgress, { color: colors.mutedForeground }]}>{puzzleIdx + 1} / {puzzles.length} لغز</Text>
           <TouchableOpacity onPress={handleNextPuzzle} activeOpacity={0.85} style={S.fullW}>
             <LinearGradient
-              colors={puzzleIdx >= puzzles.length - 1 ? ['#FFD700', '#FFA500'] : ['#00E5FF', '#00A8CC']}
+              colors={isLastInQueue ? ['#FFD700', '#FFA500'] : ['#00E5FF', '#00A8CC']}
               style={S.startBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
               <Ionicons
-                name={puzzleIdx >= puzzles.length - 1 ? 'trophy' : 'arrow-forward'}
+                name={isLastInQueue ? 'trophy' : 'arrow-forward'}
                 size={22}
                 color="#050510"
               />
               <Text style={[S.startBtnTxt, { color: '#050510' }]}>
-                {puzzleIdx >= puzzles.length - 1 ? 'النتائج النهائية' : 'اللغز التالي'}
+                {isLastInQueue ? 'النتائج النهائية' : 'اللغز التالي'}
               </Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -253,6 +268,12 @@ export default function MpRound5Screen() {
           <View style={[S.qPill, { borderColor: '#00E5FF' }]}>
             <Text style={[S.qPillTxt, { color: '#00E5FF' }]}>لغز {puzzleIdx + 1} / {puzzles.length}</Text>
           </View>
+          <TouchableOpacity onPress={handleSkip} activeOpacity={0.85} disabled={isLastInQueue}>
+            <View style={[S.skipPill, { borderColor: '#00E5FF', opacity: isLastInQueue ? 0.35 : 1 }]}>
+              <Ionicons name="play-skip-forward" size={14} color="#00E5FF" />
+              <Text style={[S.skipPillTxt, { color: '#00E5FF' }]}>تخطي هذا اللغز</Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         <View style={[S.chainCard, { backgroundColor: colors.card, borderColor: '#00E5FF' }]}>
@@ -339,4 +360,6 @@ const S = StyleSheet.create({
   buzzGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   buzzBtn: { paddingVertical: 22, borderRadius: 18, alignItems: 'center', justifyContent: 'center', gap: 8 },
   buzzBtnTxt: { fontSize: 14, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  skipPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 20, borderWidth: 1.5, paddingVertical: 6, paddingHorizontal: 12 },
+  skipPillTxt: { fontSize: 12, fontFamily: 'Inter_700Bold' },
 });

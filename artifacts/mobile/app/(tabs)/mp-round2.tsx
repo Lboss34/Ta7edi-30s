@@ -3,29 +3,41 @@
  *
  * Rules:
  * - 3 topics. For each topic, an auction takes place.
- * - Players bid in sequence. Pass = eliminated from this topic's auction.
- * - Last remaining player must answer at least (bid) items from possibleAnswers.
- * - If they succeed: win (bid) points. If they fail: 0 points.
+ * - Players bid in sequence, choosing any raise amount they like (not locked to +1).
+ * - Pass = eliminated from this topic's auction.
+ * - Last remaining player has 30 seconds to answer at least (bid) items from possibleAnswers.
+ * - Scoring is tiered by bid size (same tiers as 1v1 mode):
+ *     1–19  = 1 point
+ *     20–29 = 2 points
+ *     30–39 = 3 points
+ *     ... +1 point per additional 10
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useMultiplayer, PLAYER_COLORS } from '@/contexts/MultiplayerContext';
+import { Timer } from '@/components/Timer';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useSounds } from '@/hooks/useSounds';
+import { useGroupSounds } from '@/hooks/useGroupSounds';
 
 type Phase = 'intro' | 'bidding' | 'testing' | 'topic_result' | 'round_done';
+
+// Tiered scoring based on bid size — mirrors 1v1 mode's auctionPoints().
+function auctionPoints(bid: number): number {
+  if (bid < 20) return 1;
+  return 2 + Math.floor((bid - 20) / 10);
+}
 
 export default function MpRound2Screen() {
   const router  = useRouter();
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const { state, addScore, nextRound } = useMultiplayer();
-  const { playCorrect, playWrong, playFanfare } = useSounds(state.isMuted);
+  const { playCorrect, playWrong, playFanfare, startTick, stopTick } = useGroupSounds(state.isMuted);
 
   const topics = state.auctionTopics;
   const n      = state.players.length;
@@ -39,16 +51,20 @@ export default function MpRound2Screen() {
   const [currentBidder, setCurrentBidder] = useState(0);
   const [currentBid, setCurrentBid]       = useState(1);
   const [auctionWinner, setAuctionWinner] = useState<number | null>(null);
+  // Custom raise amount the current bidder is considering (defaults to +1 over the current bid)
+  const [pendingRaise, setPendingRaise] = useState(2);
 
   // Testing state
   const [correct, setCorrect] = useState(0);
   const [wrong,   setWrong]   = useState(0);
   const [testPhaseResult, setTestPhaseResult] = useState<'win' | 'lose' | null>(null);
+  const [timerRunning, setTimerRunning] = useState(false);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const topic = topics[topicIdx];
+  const maxBid = topic?.possibleAnswers?.length ?? 10;
 
   const resetAuction = () => {
     setBids(Array(n).fill(null));
@@ -59,6 +75,8 @@ export default function MpRound2Screen() {
     setCorrect(0);
     setWrong(0);
     setTestPhaseResult(null);
+    setTimerRunning(false);
+    stopTick();
   };
 
   const nextActiveBidder = useCallback((from: number, passedArr: boolean[]) => {
@@ -71,6 +89,11 @@ export default function MpRound2Screen() {
 
   const remainingBidders = (passedArr: boolean[]) => passedArr.filter(p => !p).length;
 
+  // Keep the custom-raise stepper's default in sync with the current bid.
+  useEffect(() => {
+    setPendingRaise(Math.min(currentBid + 1, maxBid));
+  }, [currentBid, currentBidder, maxBid]);
+
   const handlePass = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const np = [...passed];
@@ -82,16 +105,21 @@ export default function MpRound2Screen() {
       const winner = np.findIndex(p => !p);
       setAuctionWinner(winner);
       setPhase('testing');
+      setTimerRunning(true);
+      startTick();
     } else {
       setCurrentBidder(nextActiveBidder(currentBidder, np));
     }
   };
 
-  const handleRaise = () => {
+  const adjustPendingRaise = (delta: number) => {
+    Haptics.selectionAsync();
+    setPendingRaise(v => Math.max(currentBid + 1, Math.min(maxBid, v + delta)));
+  };
+
+  const handleConfirmRaise = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const newBid = currentBid + 1;
-    const maxBid = topic?.possibleAnswers?.length ?? 10;
-    if (newBid > maxBid) return;
+    const newBid = Math.max(currentBid + 1, Math.min(maxBid, pendingRaise));
     setCurrentBid(newBid);
     const nb = [...bids];
     nb[currentBidder] = newBid;
@@ -106,7 +134,9 @@ export default function MpRound2Screen() {
     setCorrect(newCorrect);
     if (newCorrect >= currentBid) {
       // Won the auction!
-      if (auctionWinner !== null) addScore(auctionWinner, currentBid);
+      setTimerRunning(false);
+      stopTick();
+      if (auctionWinner !== null) addScore(auctionWinner, auctionPoints(currentBid));
       playFanfare();
       setTestPhaseResult('win');
     }
@@ -121,9 +151,21 @@ export default function MpRound2Screen() {
     const needed = currentBid - correct;
     if (remaining < needed) {
       // Can't possibly win anymore
+      setTimerRunning(false);
+      stopTick();
       setTestPhaseResult('lose');
     }
   };
+
+  const handleTimeUp = useCallback(() => {
+    if (testPhaseResult !== null) return;
+    // 30 seconds are up and the bid hasn't been met yet — automatic loss.
+    playWrong();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    setTimerRunning(false);
+    stopTick();
+    setTestPhaseResult('lose');
+  }, [testPhaseResult, playWrong, stopTick]);
 
   const handleNextTopic = () => {
     resetAuction();
@@ -219,7 +261,7 @@ export default function MpRound2Screen() {
           <Ionicons name={isWin ? 'trophy' : 'close-circle'} size={64} color={isWin ? '#FFD700' : '#FF3B3B'} />
           <Text style={[S.resultWinner, { color: isWin ? '#FFD700' : '#FF3B3B' }]}>
             {isWin
-              ? `🏆 ${auctionWinner !== null ? state.players[auctionWinner] : '?'} وفّى رهانه! +${currentBid} نقاط`
+              ? `🏆 ${auctionWinner !== null ? state.players[auctionWinner] : '?'} وفّى رهانه! +${auctionPoints(currentBid)} نقاط`
               : `😞 ${auctionWinner !== null ? state.players[auctionWinner] : '?'} لم يوفِّ — لا نقاط`}
           </Text>
           <Text style={[S.desc, { color: colors.mutedForeground }]}>
@@ -254,7 +296,7 @@ export default function MpRound2Screen() {
           <View style={[S.center, { paddingTop: topPad, paddingBottom: botPad }]}>
             <Ionicons name={testPhaseResult === 'win' ? 'trophy' : 'close-circle'} size={64} color={testPhaseResult === 'win' ? '#FFD700' : '#FF3B3B'} />
             <Text style={[S.resultWinner, { color: testPhaseResult === 'win' ? '#FFD700' : '#FF3B3B' }]}>
-              {testPhaseResult === 'win' ? `🏆 ${winnerName} وفّى! +${currentBid} نقاط` : `😞 ${winnerName} لم يوفِّ — لا نقاط`}
+              {testPhaseResult === 'win' ? `🏆 ${winnerName} وفّى! +${auctionPoints(currentBid)} نقاط` : `😞 ${winnerName} لم يوفِّ — لا نقاط`}
             </Text>
             <TouchableOpacity onPress={() => { setPhase('topic_result'); handleNextTopic(); }} activeOpacity={0.85} style={S.fullW}>
               <LinearGradient colors={['#FFD700', '#FFA500']} style={S.startBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
@@ -282,6 +324,7 @@ export default function MpRound2Screen() {
           <View style={[S.winnerBanner, { borderColor: winnerColor, backgroundColor: `${winnerColor}12` }]}>
             <Text style={[S.winnerBannerTxt, { color: winnerColor }]}>{winnerName} يتحدى!</Text>
           </View>
+          <Timer seconds={30} running={timerRunning} onComplete={handleTimeUp} />
           <View style={[S.topicCard, { backgroundColor: colors.card, borderColor: '#FFD700' }]}>
             <Text style={[S.topicCategory, { color: '#FFD700' }]}>{topic?.category}</Text>
             <Text style={[S.topicDesc, { color: colors.foreground }]}>{topic?.description}</Text>
@@ -335,7 +378,6 @@ export default function MpRound2Screen() {
   // ── Bidding Phase ─────────────────────────────────────────────────────────
   const currentBidderColor = PLAYER_COLORS[currentBidder] ?? '#FFD700';
   const activeBidders = passed.filter(p => !p).length;
-  const maxBid = topic?.possibleAnswers?.length ?? 10;
 
   return (
     <View style={[S.root, { backgroundColor: colors.background }]}>
@@ -393,6 +435,28 @@ export default function MpRound2Screen() {
           </Text>
         </View>
 
+        {/* Custom raise amount — pick any value between currentBid+1 and maxBid */}
+        {currentBid < maxBid && (
+          <View style={[S.raiseStepper, { borderColor: '#FFD700' }]}>
+            <Text style={[S.bidLabel, { color: colors.mutedForeground }]}>مبلغ الزيادة الجديد</Text>
+            <View style={S.raiseStepperRow}>
+              <TouchableOpacity onPress={() => adjustPendingRaise(-5)} disabled={pendingRaise <= currentBid + 1} style={[S.raiseStepBtn, { opacity: pendingRaise <= currentBid + 1 ? 0.35 : 1 }]}>
+                <Text style={S.raiseStepBtnTxt}>-٥</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => adjustPendingRaise(-1)} disabled={pendingRaise <= currentBid + 1} style={[S.raiseStepBtn, { opacity: pendingRaise <= currentBid + 1 ? 0.35 : 1 }]}>
+                <Text style={S.raiseStepBtnTxt}>-١</Text>
+              </TouchableOpacity>
+              <Text style={[S.raiseAmount, { color: '#FFD700' }]}>{pendingRaise}</Text>
+              <TouchableOpacity onPress={() => adjustPendingRaise(1)} disabled={pendingRaise >= maxBid} style={[S.raiseStepBtn, { opacity: pendingRaise >= maxBid ? 0.35 : 1 }]}>
+                <Text style={S.raiseStepBtnTxt}>+١</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => adjustPendingRaise(5)} disabled={pendingRaise >= maxBid} style={[S.raiseStepBtn, { opacity: pendingRaise >= maxBid ? 0.35 : 1 }]}>
+                <Text style={S.raiseStepBtnTxt}>+٥</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={S.controlsRow}>
           <TouchableOpacity
             onPress={handlePass}
@@ -406,7 +470,7 @@ export default function MpRound2Screen() {
             </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={handleRaise}
+            onPress={handleConfirmRaise}
             activeOpacity={0.85}
             style={{ flex: 1 }}
             disabled={currentBid >= maxBid}
@@ -418,7 +482,7 @@ export default function MpRound2Screen() {
             >
               <Ionicons name="trending-up" size={22} color={currentBid >= maxBid ? '#666' : '#050510'} />
               <Text style={[S.controlBtnTxt, { color: currentBid >= maxBid ? '#666' : '#050510' }]}>
-                زايد ← {Math.min(currentBid + 1, maxBid)}
+                زايد ← {pendingRaise}
               </Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -459,6 +523,11 @@ const S = StyleSheet.create({
   bidderName: { fontSize: 16, fontFamily: 'Inter_700Bold' },
   playerBidChip: { borderRadius: 8, borderWidth: 1, paddingVertical: 4, paddingHorizontal: 10 },
   playerBidTxt: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  raiseStepper: { borderRadius: 16, borderWidth: 1.5, padding: 14, alignItems: 'center', gap: 10 },
+  raiseStepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  raiseStepBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,215,0,0.12)', alignItems: 'center', justifyContent: 'center' },
+  raiseStepBtnTxt: { fontSize: 15, fontFamily: 'Inter_700Bold', color: '#FFD700' },
+  raiseAmount: { fontSize: 32, fontFamily: 'Inter_700Bold', minWidth: 64, textAlign: 'center' },
   turnBanner: { borderRadius: 14, borderWidth: 1.5, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   turnBannerTxt: { fontSize: 18, fontFamily: 'Inter_700Bold' },
   controlsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },

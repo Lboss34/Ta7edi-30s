@@ -17,7 +17,7 @@ import { useColors } from '@/hooks/useColors';
 import { useMultiplayer, PLAYER_COLORS } from '@/contexts/MultiplayerContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useSounds } from '@/hooks/useSounds';
+import { useGroupSounds } from '@/hooks/useGroupSounds';
 
 type Phase = 'intro' | 'playing' | 'confirming' | 'question_result' | 'round_done';
 
@@ -26,7 +26,7 @@ export default function MpRound3Screen() {
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const { state, addScore, nextRound } = useMultiplayer();
-  const { playCorrect, playWrong, playFanfare } = useSounds(state.isMuted);
+  const { playCorrect, playWrong, playFanfare } = useGroupSounds(state.isMuted);
 
   const questions = state.buzzerQuestions;
   const n         = state.players.length;
