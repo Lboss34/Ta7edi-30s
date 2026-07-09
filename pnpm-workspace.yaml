@@ -44,6 +44,18 @@ onlyBuiltDependencies:
 
 overrides:
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
+  # Security: force patched versions of vulnerable transitive deps
+  node-forge: ^1.4.0
+  tar: ^7.5.19
+  minimatch: ^5.1.6
+  '@xmldom/xmldom': ^0.9.10
+  uuid: ^11.1.1
+  ajv: ^8.20.0
+  yaml: ^2.9.0
+  postcss: ^8.5.16
+  diff: ^9.0.0
+  ts-deepmerge: ^8.0.0
+  joi: ^18.2.3
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-freebsd-ia32': '-'
@@ -66,7 +78,7 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
   '@types/react': 19.1.17
   '@types/react-dom': 19.1.11
-  esbuild: 0.27.3
+  esbuild: ^0.28.1
   esbuild>@esbuild/aix-ppc64: '-'
   esbuild>@esbuild/android-arm: '-'
   esbuild>@esbuild/android-arm64: '-'

@@ -15,5 +15,9 @@
     "prettier": "^3.8.4",
     "tsx": "catalog:",
     "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "eas-cli": "^20.5.1",
+    "expo-updates": "^57.0.6"
   }
 }
