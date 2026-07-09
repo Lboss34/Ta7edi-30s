@@ -13,7 +13,7 @@
  *     ... +1 point per additional 10
  */
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,6 +25,46 @@ import * as Haptics from 'expo-haptics';
 import { useGroupSounds } from '@/hooks/useGroupSounds';
 
 type Phase = 'intro' | 'bidding' | 'testing' | 'topic_result' | 'round_done';
+
+// ── كروت التخريب النفسية ─────────────────────────────────────────────────────
+interface SabotageCard {
+  id: string;
+  title: string;
+  description: string;
+}
+
+const SABOTAGE_CARDS: SabotageCard[] = [
+  {
+    id: 'liar',
+    title: 'المُضلل الكاذب',
+    description: 'ارمِ إجابتين غلط بثقة عمياء وصوت عالي أول ما يبدأ العداد عشان تشتت تفكيره!',
+  },
+  {
+    id: 'last5',
+    title: 'شوشرة الـ ٥ ثواني',
+    description: 'مسموح لك تتكلم أو تغني أو تسولف معاه وتشتته في آخر ٥ ثواني من وقته غصب عنه!',
+  },
+  {
+    id: 'conan',
+    title: 'المحقق كونان',
+    description: 'اسأله سؤال ماله أي علاقة بالكورة بنص المزاد ولازم يجاوب عليه قبل ما يكمل إجاباته!',
+  },
+  {
+    id: 'parrot',
+    title: 'ببغاء المجلس',
+    description: 'أي إجابة صحيحة يقولها صاحب المزاد، كررها وراه فورًا بصوت استهزائي عشان تنرفزه!',
+  },
+  {
+    id: 'stare',
+    title: 'المُراقب الصامت',
+    description: 'قرب وجهك منه وطالع في عيونه بدون ما ترمش نهائيًا لين يخلص وقته!',
+  },
+  {
+    id: 'laugh',
+    title: 'شرط التلعثم',
+    description: 'صرخ فيه وقوله: قول الإجابة الجاية وأنت تضحك وإلا ماراح تنحسب!',
+  },
+];
 
 // Tiered scoring based on bid size — mirrors 1v1 mode's auctionPoints().
 function auctionPoints(bid: number): number {
@@ -54,6 +94,10 @@ export default function MpRound2Screen() {
   // Custom raise amount the current bidder is considering (defaults to +1 over the current bid)
   const [pendingRaise, setPendingRaise] = useState(2);
 
+  // كرت التخريب النفسي لهذا المزاد
+  const [currentSabotage, setCurrentSabotage] = useState<{ saboteurIdx: number; card: SabotageCard } | null>(null);
+  const [showSabotageModal, setShowSabotageModal] = useState(false);
+
   // Testing state
   const [correct, setCorrect] = useState(0);
   const [wrong,   setWrong]   = useState(0);
@@ -76,6 +120,8 @@ export default function MpRound2Screen() {
     setWrong(0);
     setTestPhaseResult(null);
     setTimerRunning(false);
+    setCurrentSabotage(null);
+    setShowSabotageModal(false);
     stopTick();
   };
 
@@ -105,11 +151,30 @@ export default function MpRound2Screen() {
       const winner = np.findIndex(p => !p);
       setAuctionWinner(winner);
       setPhase('testing');
-      setTimerRunning(true);
-      startTick();
+
+      // كروت التخريب النفسية — فقط عند وجود أكثر من لاعبين (لعب جماعي حقيقي)
+      if (n > 2) {
+        const saboteurCandidates = state.players.map((_, i) => i).filter(i => i !== winner);
+        const saboteurIdx = saboteurCandidates[Math.floor(Math.random() * saboteurCandidates.length)];
+        const card = SABOTAGE_CARDS[Math.floor(Math.random() * SABOTAGE_CARDS.length)];
+        setCurrentSabotage({ saboteurIdx, card });
+        setShowSabotageModal(true);
+        // العداد لا يبدأ إلا بعد إغلاق الحكم لنافذة التخريب
+      } else {
+        setTimerRunning(true);
+        startTick();
+      }
     } else {
       setCurrentBidder(nextActiveBidder(currentBidder, np));
     }
+  };
+
+  const handleContinueSabotage = () => {
+    if (!showSabotageModal) return; // avoid double-trigger on rapid taps
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowSabotageModal(false);
+    setTimerRunning(true);
+    startTick();
   };
 
   const adjustPendingRaise = (delta: number) => {
@@ -371,6 +436,38 @@ export default function MpRound2Screen() {
             </View>
           </View>
         </ScrollView>
+
+        {/* ── نافذة كروت التخريب النفسية ────────────────────────────────── */}
+        <Modal
+          visible={showSabotageModal && currentSabotage !== null}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => {}}
+        >
+          <View style={S.sabotageOverlay}>
+            <View style={[S.sabotageCard, { borderColor: '#FF3B3B' }]}>
+              <Ionicons name="skull" size={48} color="#FF3B3B" />
+              <Text style={[S.sabotageWarning, { color: '#FF3B3B' }]}>⚠️ مهمة سرية وتخريبية</Text>
+              <Text style={[S.sabotageSaboteur, { color: currentSabotage ? (PLAYER_COLORS[currentSabotage.saboteurIdx] ?? '#FFD700') : '#FFD700' }]}>
+                للاعب: {currentSabotage ? state.players[currentSabotage.saboteurIdx] : ''}
+              </Text>
+              <View style={S.sabotageCardBox}>
+                <Text style={S.sabotageCardTitle}>{currentSabotage?.card.title}</Text>
+                <Text style={S.sabotageCardDesc}>{currentSabotage?.card.description}</Text>
+              </View>
+              <Text style={S.sabotageHostNote}>
+                (أيها الحكم: أرِ الشاشة للمخرب بسكون تام دون أن يشعر صاحب المزاد، ثم اضغط زر استمرار أدناه)
+              </Text>
+              <TouchableOpacity onPress={handleContinueSabotage} activeOpacity={0.85} style={S.fullW}>
+                <LinearGradient colors={['#FFD700', '#FFA500']} style={S.startBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                  <Ionicons name="lock-closed" size={20} color="#050510" />
+                  <Text style={[S.startBtnTxt, { color: '#050510' }]}>استمرار وإغلاق</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -546,4 +643,21 @@ const S = StyleSheet.create({
   answersList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' },
   answerChip: { borderRadius: 10, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10 },
   answerChipTxt: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  // Sabotage modal
+  sabotageOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center', padding: 24,
+  },
+  sabotageCard: {
+    width: '100%', maxWidth: 420, borderRadius: 24, borderWidth: 2,
+    backgroundColor: '#0A0A16', padding: 24, gap: 14, alignItems: 'center',
+  },
+  sabotageWarning: { fontSize: 20, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  sabotageSaboteur: { fontSize: 24, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  sabotageCardBox: {
+    width: '100%', borderRadius: 16, borderWidth: 1.5, borderColor: '#FF3B3B',
+    backgroundColor: 'rgba(255,59,59,0.08)', padding: 16, gap: 8, alignItems: 'center',
+  },
+  sabotageCardTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#FFD700', textAlign: 'center' },
+  sabotageCardDesc: { fontSize: 14, fontFamily: 'Inter_500Medium', color: '#FFF', textAlign: 'center', lineHeight: 22 },
+  sabotageHostNote: { fontSize: 12, fontFamily: 'Inter_400Regular', color: '#888', textAlign: 'center', lineHeight: 18 },
 });
