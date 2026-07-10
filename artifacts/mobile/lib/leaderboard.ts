@@ -9,10 +9,25 @@ export interface LeaderboardEntry {
 
 export class LeaderboardFetchError extends Error {}
 
-function withTimeout(ms: number): { signal: AbortSignal; cancel: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return { signal: controller.signal, cancel: () => clearTimeout(timer) };
+class TimeoutError extends Error {}
+
+// NOTE: deliberately not using `AbortController`/`signal` here. On RN 0.81,
+// constructing an AbortController touches the native Event/EventTarget
+// polyfill (`abort-controller` + `event-target-shim`), which can collide
+// with React Native's own built-in DOM Event classes and throw
+// "Cannot assign to read-only property 'NONE'" — poisoning the global Event
+// class for the rest of the JS runtime (breaking unrelated screens like
+// Round 1's question loading). A plain timeout race avoids touching that
+// machinery entirely; it just means the underlying fetch keeps running in
+// the background after we give up on it, which is fine for a read-only GET.
+function raceWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new TimeoutError('Request timed out')), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 /**
@@ -26,19 +41,16 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
   let lastErr: unknown;
 
   for (let i = 0; i < attempts; i++) {
-    const { signal, cancel } = withTimeout(8000);
     try {
-      const res = await fetch(`${API_BASE}/leaderboard`, {
-        headers: { Accept: 'application/json' },
-        signal,
-      });
-      cancel();
+      const res = await raceWithTimeout(
+        fetch(`${API_BASE}/leaderboard`, { headers: { Accept: 'application/json' } }),
+        8000,
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!Array.isArray(data)) throw new Error('Unexpected response shape');
       return data as LeaderboardEntry[];
     } catch (err) {
-      cancel();
       lastErr = err;
       if (i < attempts - 1) {
         await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
