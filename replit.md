@@ -5,8 +5,8 @@ A mobile trivia/competition game built with Expo (React Native), featuring 5 gam
 ## Run & Operate
 
 - Configured workflows:
-  - **API Server** (`artifacts/api-server: API Server`) — `PORT=8080 pnpm --filter @workspace/api-server run dev`
-  - **Mobile (Expo)** (`artifacts/mobile: expo`) — must be started from replit.com (not the iOS app); command: `PORT=18115 BASE_PATH=/ pnpm --filter @workspace/mobile run dev`
+  - **API Server** (`artifacts/api-server: API Server`) — `PORT=8080 pnpm --filter @workspace/api-server run dev` — running
+  - **Mobile (Expo)** (`artifacts/mobile`, config at `artifacts/mobile/.replit-artifact/artifact.toml`) — must be started/previewed from replit.com (not the iOS app); command: `PORT=18115 BASE_PATH=/ pnpm --filter @workspace/mobile run dev`. No workflow is currently running for it — start it from replit.com when needed.
 - `pnpm --filter @workspace/api-server run dev` — run the API server manually (port is env-driven via `PORT`, no default)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
