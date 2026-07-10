@@ -1,9 +1,6 @@
 /**
  * Base URL for the API server.
- * On Replit: uses EXPO_PUBLIC_DOMAIN (the dev proxy domain).
- * The API server is mounted at /api via the path-based router.
+ * Hardcoded to the live Replit URL to bypass environment proxy issues.
  */
-const domain = process.env["EXPO_PUBLIC_DOMAIN"] ?? "";
-export const API_BASE = domain
-  ? `https://${domain}/api`
-  : "https://ta-7-edi-30-s--josaxo5807.replit.app/api";
+export const API_BASE = "https://06255ce4-2d8c-42c1-aaa9-6f6ccc551ccb-00-18c5fn11r02at.kirk.replit.dev/api";
+
