@@ -72,6 +72,8 @@ export default function LeaderboardScreen() {
 
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loaded, setLoaded]   = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -79,16 +81,30 @@ export default function LeaderboardScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      setLoaded(false);
+      setLoadError(false);
       (async () => {
-        const data = await getLeaderboard();
-        if (!cancelled) {
-          setEntries(data);
-          setLoaded(true);
+        try {
+          const data = await getLeaderboard();
+          if (!cancelled) {
+            setEntries(data);
+            setLoaded(true);
+          }
+        } catch {
+          if (!cancelled) {
+            setLoadError(true);
+            setLoaded(true);
+          }
         }
       })();
       return () => { cancelled = true; };
-    }, [])
+    }, [retryTick])
   );
+
+  const handleRetry = () => {
+    playClick();
+    setRetryTick((t) => t + 1);
+  };
 
   const handleBack = () => {
     playClick();
@@ -121,7 +137,22 @@ export default function LeaderboardScreen() {
           </View>
         </View>
 
-        {loaded && entries.length === 0 ? (
+        {loaded && loadError ? (
+          <View style={styles.emptyWrap}>
+            <Ionicons name="cloud-offline-outline" size={56} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>تعذّر الوصول إلى الخادم</Text>
+            <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
+              تحقق من اتصالك بالإنترنت وحاول مجددًا
+            </Text>
+            <TouchableOpacity
+              onPress={handleRetry}
+              activeOpacity={0.85}
+              style={[styles.backBtn, { width: 'auto', paddingHorizontal: 18, borderColor: colors.border }]}
+            >
+              <Text style={{ color: colors.foreground, fontFamily: 'Inter_500Medium' }}>إعادة المحاولة</Text>
+            </TouchableOpacity>
+          </View>
+        ) : loaded && entries.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Ionicons name="trophy-outline" size={56} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>العرش شاغر بعد!</Text>

@@ -7,23 +7,49 @@ export interface LeaderboardEntry {
   lastPlayed: number;
 }
 
+export class LeaderboardFetchError extends Error {}
+
+function withTimeout(ms: number): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, cancel: () => clearTimeout(timer) };
+}
+
 /**
  * Fetches the full leaderboard from MongoDB via the API server.
- * Returns an empty array on any failure so the UI degrades gracefully.
+ * Retries a couple of times (deployments can take a moment to wake from
+ * sleep), then throws LeaderboardFetchError so the UI can tell a real
+ * network/server failure apart from a genuinely empty leaderboard.
  */
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  try {
-    const res = await fetch(`${API_BASE}/leaderboard`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data as LeaderboardEntry[];
-  } catch (err) {
-    console.warn('[leaderboard] getLeaderboard failed:', err);
-    return [];
+  const attempts = 3;
+  let lastErr: unknown;
+
+  for (let i = 0; i < attempts; i++) {
+    const { signal, cancel } = withTimeout(8000);
+    try {
+      const res = await fetch(`${API_BASE}/leaderboard`, {
+        headers: { Accept: 'application/json' },
+        signal,
+      });
+      cancel();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error('Unexpected response shape');
+      return data as LeaderboardEntry[];
+    } catch (err) {
+      cancel();
+      lastErr = err;
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+      }
+    }
   }
+
+  console.warn('[leaderboard] getLeaderboard failed after retries:', lastErr);
+  throw new LeaderboardFetchError(
+    lastErr instanceof Error ? lastErr.message : 'Unknown error',
+  );
 }
 
 /**
