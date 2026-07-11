@@ -1,6 +1,13 @@
 /**
  * Base URL for the API server.
- * Hardcoded to the live Replit URL to bypass environment proxy issues.
+ *
+ * IMPORTANT: this must point to the published Replit *deployment* URL,
+ * not the workspace's `*.replit.dev` dev-preview domain. The dev-preview
+ * domain is a workspace-session proxy meant for the browser preview pane —
+ * it is not a stable public endpoint and does not reliably accept requests
+ * from external devices (like a phone running Expo Go) once the workspace
+ * browser session/preview isn't active. The deployment URL below is the
+ * always-on, publicly routable address for the API server.
  */
-export const API_BASE = "https://06255ce4-2d8c-42c1-aaa9-6f6ccc551ccb-00-18c5fn11r02at.kirk.replit.dev/api";
+export const API_BASE = "https://ta-7-edi-30-s--josaxo5807.replit.app/api";
 
