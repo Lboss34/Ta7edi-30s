@@ -16,6 +16,11 @@ import * as SplashScreen from 'expo-splash-screen';
 import { GameProvider } from '@/contexts/GameContext';
 import { MultiplayerProvider } from '@/contexts/MultiplayerContext';
 import { SoundProvider } from '@/contexts/SoundContext';
+import { warmAbortControllerPolyfill } from '@/lib/safeAbortPolyfill';
+
+// Warm RN's lazy AbortController/Event polyfill once at startup, defensively
+// (see lib/safeAbortPolyfill.ts for why this exists).
+warmAbortControllerPolyfill();
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
