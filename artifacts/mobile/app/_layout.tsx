@@ -13,6 +13,7 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import { AuthProvider } from '@/contexts/AuthContext';
 import { GameProvider } from '@/contexts/GameContext';
 import { MultiplayerProvider } from '@/contexts/MultiplayerContext';
 import { SoundProvider } from '@/contexts/SoundContext';
@@ -57,13 +58,15 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <KeyboardProvider>
-              <GameProvider>
-                <MultiplayerProvider>
-                  <SoundProvider>
-                    <RootLayoutNav />
-                  </SoundProvider>
-                </MultiplayerProvider>
-              </GameProvider>
+              <AuthProvider>
+                <GameProvider>
+                  <MultiplayerProvider>
+                    <SoundProvider>
+                      <RootLayoutNav />
+                    </SoundProvider>
+                  </MultiplayerProvider>
+                </GameProvider>
+              </AuthProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>

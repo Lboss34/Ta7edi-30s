@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useGame, Difficulty } from '@/contexts/GameContext';
 import { useMultiplayer, PLAYER_COLORS, PLAYER_DEFAULTS } from '@/contexts/MultiplayerContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSounds } from '@/hooks/useSounds';
@@ -46,6 +47,7 @@ export default function HomeScreen() {
   const colors = useColors();
   const { startGame }             = useGame();
   const { startMultiplayerGame, state: mpState } = useMultiplayer();
+  const { user }                  = useAuth();
   const { playClick }             = useSounds(false);
 
   const [step, setStep]           = useState<Step>('mode');
@@ -106,6 +108,12 @@ export default function HomeScreen() {
     router.push('/leaderboard');
   };
 
+  const handleAccount = () => {
+    playClick();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push(user ? '/friends' : '/auth-login');
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -129,12 +137,22 @@ export default function HomeScreen() {
           <Text style={[S.subtitle, { color: colors.accent }]}>بطولة الفوازير الرياضية</Text>
         </View>
 
-        <TouchableOpacity onPress={handleLeaderboard} activeOpacity={0.85}>
-          <View style={[S.leaderboardBtn, { borderColor: '#FFD700' }]}>
-            <MaterialCommunityIcons name="crown" size={20} color="#FFD700" />
-            <Text style={[S.leaderboardBtnTxt, { color: '#FFD700' }]}>لوحة الصدارة — ملك العرش</Text>
-          </View>
-        </TouchableOpacity>
+        <View style={S.topBtnRow}>
+          <TouchableOpacity onPress={handleLeaderboard} activeOpacity={0.85} style={{ flex: 1 }}>
+            <View style={[S.leaderboardBtn, { borderColor: '#FFD700' }]}>
+              <MaterialCommunityIcons name="crown" size={20} color="#FFD700" />
+              <Text style={[S.leaderboardBtnTxt, { color: '#FFD700' }]}>لوحة الصدارة</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleAccount} activeOpacity={0.85} style={{ flex: 1 }}>
+            <View style={[S.leaderboardBtn, { borderColor: '#7B2FFF' }]}>
+              <MaterialCommunityIcons name={user ? 'account-group' : 'account-circle-outline'} size={20} color="#7B2FFF" />
+              <Text style={[S.leaderboardBtnTxt, { color: '#7B2FFF' }]} numberOfLines={1}>
+                {user ? user.username : 'تسجيل الدخول'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
 
         {/* ── Step: mode ─────────────────────────────────────────────────── */}
         {step === 'mode' && (
@@ -543,10 +561,11 @@ const S = StyleSheet.create({
   },
   roundN: { fontSize: 16, fontFamily: 'Inter_700Bold' },
   roundLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  topBtnRow: { flexDirection: 'row', gap: 10 },
   leaderboardBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderRadius: 14, borderWidth: 1.5, paddingVertical: 10, paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,215,0,0.06)', alignSelf: 'center',
+    borderRadius: 14, borderWidth: 1.5, paddingVertical: 10, paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,215,0,0.06)',
   },
   leaderboardBtnTxt: { fontSize: 13, fontFamily: 'Inter_700Bold' },
 });

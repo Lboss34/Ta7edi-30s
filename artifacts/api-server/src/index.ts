@@ -3,6 +3,8 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { getDb } from "./lib/mongodb";
 import { seedIfEmpty } from "./lib/seed";
+import { ensureIndexes } from "./lib/indexes";
+import { createSocketServer } from "./lib/socket";
 
 const rawPort = process.env["PORT"];
 
@@ -26,6 +28,9 @@ server.on("error", (err) => {
   process.exit(1);
 });
 
+// Accounts/friends presence — Socket.io needs the raw http server, not just Express.
+createSocketServer(server);
+
 server.listen(port, () => {
   logger.info({ port }, "Server listening");
 
@@ -33,7 +38,10 @@ server.listen(port, () => {
   const mongoUri = process.env["MONGODB_URI"];
   if (mongoUri) {
     getDb()
-      .then((db) => seedIfEmpty(db))
+      .then(async (db) => {
+        await seedIfEmpty(db);
+        await ensureIndexes(db);
+      })
       .catch((err) => {
         logger.warn({ err }, "MongoDB init failed — questions API will be unavailable");
       });

@@ -20,6 +20,9 @@ export default function GameLayout() {
       <Stack.Screen name="mp-round5" />
       <Stack.Screen name="mp-results" />
       <Stack.Screen name="mp-tiebreaker" />
+      <Stack.Screen name="auth-login" />
+      <Stack.Screen name="auth-register" />
+      <Stack.Screen name="friends" />
     </Stack>
   );
 }
