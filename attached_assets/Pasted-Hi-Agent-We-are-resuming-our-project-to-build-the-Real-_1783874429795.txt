@@ -1,0 +1,29 @@
+Hi Agent. We are resuming our project to build the "Real-Time Online Multiplayer Mode" (1v1 and Group). To ensure complete context, here is the master plan of how the online game must work, followed by our current progress.
+
+### 🧠 The Master Plan (Game Logic):
+- **No Host & Text-Based:** The server acts as the referee. Players type their answers.
+- **Fuzzy Matching:** The backend must use text similarity (e.g., `textMatch.ts`). If an answer is >= 85% similar to the correct one (ignoring spaces/Arabic typos), it's correct.
+- **Stage 1 (What Do You Know?):** Turn-based. A player has exactly 6 seconds to type. Timeout = Strike. Next player's turn.
+- **Stage 2 (The Auction):** 6s to bid. The winner types answers against a descending clock. Real-time UI updates for correct/wrong answers.
+- **Stage 3 (The Buzzer):** First to press the on-screen buzzer gets to type. If wrong, they are locked out and others can buzz. Server handles timestamps to prevent latency issues.
+- **Stage 4 (Guess The Player):** All players type simultaneously. First correct answer wins. Wrong guesses are broadcasted to all.
+- **Tie-Breaker:** Sudden death "Guess the Player". Includes a "Change Player" unanimous vote button.
+
+### 🔍 Current State (What you already did):
+1. **Phase 1 (Complete):** Auth, MongoDB setup, 6-digit User IDs, Avatars, and the Friends List (with online Socket.io status) are 100% done and working.
+2. **Phase 2 Backend (Partially Done):** Before the session interrupted, you started building the multiplayer engine. You created files like `rooms.ts`, `engine.ts`, `matchmaking.ts`, `socketHandlers.ts`, and `textMatch.ts`. 
+
+### 🛠️ Your Mission Now (Pick up where you left off):
+**Step 1: Audit & Stabilize the Backend:**
+Review your partially written files (`engine.ts`, `rooms.ts`, `textMatch.ts`, etc.). Ensure they perfectly reflect the 4-stage logic described in the Master Plan above without any TS errors.
+
+**Step 2: Build the Missing Mobile UI:**
+Currently, there is no UI to actually use this online engine. Please build the Frontend Screens:
+- A UI to invite an online friend and accept invites.
+- A "Lobby/Waiting Room" UI.
+- The actual Game UI for the 4 stages (integrating the 6s timers, typing inputs, and buzzer).
+
+**Step 3: Voice Chat Integration:**
+Integrate WebRTC/Push-to-talk inside the room so players can talk, including a Mute/Unmute UI button and proper mic permissions.
+
+Please start with Step 1 (Auditing your previous backend work against the Master Plan). Let me know when the backend is solid and you are starting on the UI!

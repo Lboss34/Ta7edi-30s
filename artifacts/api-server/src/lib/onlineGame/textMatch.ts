@@ -61,11 +61,12 @@ function similarity(a: string, b: string): number {
   return 1 - levenshtein(a, b) / maxLen;
 }
 
-/** Similarity threshold scales with word length — short answers must be near-exact. */
+/** Similarity threshold scales with word length — short answers must be near-exact.
+ *  Master Plan spec: ">= 85% similar". Very short answers (≤3 chars) must be exact
+ *  to avoid accepting single-char mismatches on 2-letter words. */
 function thresholdFor(normalized: string): number {
   if (normalized.length <= 3) return 1; // exact match only for very short answers
-  if (normalized.length <= 6) return 0.84;
-  return 0.78;
+  return 0.85; // 85% threshold for all longer answers, per Master Plan
 }
 
 /**

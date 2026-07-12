@@ -14,8 +14,8 @@ import type {
 } from "./types";
 
 const LIMITS = { round1: 6, round2: 3, round3: 8, round4: 8, round5: 4 };
-const ROUND1_TIME_MS = 20_000;
-const ROUND2_BID_TIME_MS = 8_000;
+const ROUND1_TIME_MS = 6_000;       // Master Plan: "6 seconds to type"
+const ROUND2_BID_TIME_MS = 6_000;   // Master Plan: "6s to bid"
 const ROUND2_ANSWER_TIME_MS = 15_000;
 const ROUND3_BUZZ_WINDOW_MS = 20_000;
 const ROUND3_ANSWER_TIME_MS = 10_000;
