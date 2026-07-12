@@ -18,7 +18,9 @@ function toPublicProfile(doc: WithId<Document> | Document) {
 }
 
 // Every route below requires a logged-in user.
-router.use(requireAuth);
+// Scoped to /users and /friends so unmatched paths don't get intercepted
+// by requireAuth and returned as 401 instead of a proper 404.
+router.use(["/users", "/friends"], requireAuth);
 
 // GET /api/users/search?uniqueId=038492 — look someone up before sending a request
 router.get("/users/search", async (req, res) => {
