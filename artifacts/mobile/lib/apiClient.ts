@@ -9,5 +9,5 @@
  * browser session/preview isn't active. The deployment URL below is the
  * always-on, publicly routable address for the API server.
  */
-export const API_BASE = "https://ta-7-edi-30-s--josaxo5807.replit.app/api";
+export const API_BASE = "https://ta-7-edi-30-s--balodel378.replit.app/api";
 
