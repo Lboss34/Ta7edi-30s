@@ -1,0 +1,47 @@
+Hi Agent. We are taking a massive leap. We need to implement a fully functional "Real-Time Online Multiplayer Mode" (1v1 and Group) for our existing Trivia Game, complete with Real-Time Voice Chat. The game itself will act as the "Referee" (No host/phone carrier). Players will type their answers. 
+
+Please implement this using `socket.io` for real-time state synchronization, and ensure zero bugs, smooth state management, and perfect syncing.
+
+Here are the strict requirements and mechanics to implement:
+
+### Phase 1: Account & Friend System
+1. **User Accounts:** Users create an account (saved in MongoDB). They get a unique Profile, Username, Avatar, and a Unique ID.
+2. **Friend System:** Add a "Friends" tab. Users can search by Unique ID, send requests, and add friends. 
+3. **Matchmaking:** A player can invite online friends to an "Online Room" (1v1 or Group mode).
+
+### Phase 2: Core Online & Communication Mechanics
+- **Real-Time Voice Chat (CRITICAL):** Implement a zero-latency voice chat system so players can talk while playing.
+  - *Tech Constraint:* Use a robust WebRTC solution compatible with Expo (like `react-native-webrtc` with socket signaling, or LiveKit/Agora).
+  - *UI:* Add a clean, easily accessible Mute/Unmute Mic toggle button in a suitable place on the screen.
+  - *Permissions:* Properly handle iOS/Android microphone permissions before joining the room.
+  - *Audio Mixing:* Ensure voice chat audio does not clash with or mute the game's sound effects.
+- **Quick Chat & Reactions:** Add a small UI menu to send quick floating emojis (😂, 🔥, 👏) or preset texts (e.g., "Hurry up!", "GG").
+- **No Host:** Answers are hidden. The server verifies typed answers.
+- **Fuzzy Matching (CRITICAL):** Use a library like `string-similarity` on the backend. If a player's typed answer is >= 85% similar to the correct answer (ignoring Arabic hamzas, spaces, and minor typos), count it as correct.
+- **Real-Time Visibility:** Broadcast typed answers (right or wrong) to all screens instantly.
+- **Sound Effects:** Trigger existing offline sound effects (correct, wrong, buzzer, timer) via socket events so everyone hears them perfectly synced.
+
+### Phase 3: The 4 Stages Logic
+**1. What Do You Know?:**
+- Turn-based. A player has exactly a 6-second timer to type when it's their turn.
+- Timeout (6s ends) = "Strike", and the turn moves to the next player automatically.
+
+**2. The Auction (Bidding):**
+- Bidding phase: 6-second timer to place a bid. Timeout = player is skipped for this question.
+- Answering phase: Winning bidder types answers against a descending clock. 
+- UI shows real-time progress to everyone (e.g., "1/8 answers"). Wrong answers show as "1 mistake" (no limit). Right answers increment the counter.
+
+**3. The Buzzer Round (Speed):**
+- First to click the on-screen buzzer gets the chance to type.
+- *Tech Constraint:* Use Server-Side Timestamps to determine who pressed the buzzer first to avoid latency disputes.
+- Correct = point. Wrong = locked out, and others can buzz in. 
+
+**4. Guess The Player (Simultaneous):**
+- Player career path appears. ALL players can type simultaneously.
+- Wrong guesses are broadcasted to all screens. First player to type the correct answer wins the point.
+
+### Phase 4: Tie-Breaker & Disconnects
+- **Tie-Breaker:** If tied, trigger a single "Sudden Death" round (Guess the Player, Medium). First correct answer wins. Add a "Change Player" button (requires unanimous vote to skip).
+- **Graceful Reconnect:** If a player's internet drops, give them a 30-second window to reconnect to the exact same room/state without getting kicked.
+
+Let's start by setting up Phase 1 (Accounts, Auth, Friend System) and the basic Socket.io server. Tell me when Step 1 is fully tested and done!
