@@ -4,6 +4,7 @@ import { ObjectId, type Db } from "mongodb";
 import { getDb } from "./mongodb";
 import { hashToken } from "./auth";
 import { logger } from "./logger";
+import { registerOnlineGameHandlers } from "./onlineGame/socketHandlers";
 
 let io: Server | null = null;
 
@@ -91,6 +92,9 @@ export function createSocketServer(httpServer: HttpServer): Server {
           .catch((err) => logger.warn({ err }, "[socket] offline broadcast failed"));
       }
     });
+
+    // Online multiplayer: rooms, matchmaking, synced round logic, voice relay.
+    registerOnlineGameHandlers(io!, socket);
   });
 
   logger.info("Socket.io server attached at /api/socket.io");
