@@ -67,11 +67,16 @@ export interface OnlinePlayer {
   socketId: string | null;
   connected: boolean;
   score: number;
-  strikes: number;
+  strikes: number;         // global strikes (unused in new Round 1 but kept for compat)
   skipUsed: boolean;
   outOfRound1: boolean;
   disconnectedAt: number | null;
   isHost: boolean;
+  // Leveling & stats
+  level: number;
+  totalWins: number;
+  // Round 1 per-question state (resets each question)
+  questionStrikes: number;
 }
 
 export interface BuzzLock {
@@ -103,6 +108,8 @@ export interface Room {
   // round1 (ping-pong turn based)
   turnOrder: string[];
   turnIndex: number;
+  // Per-question strikes for Round 1 (key = userId)
+  questionStrikes: Record<string, number>;
 
   // round2 (auction)
   currentBid: { userId: string; amount: number } | null;
@@ -121,7 +128,10 @@ export interface Room {
 
   tiebreakerPool: TransferPuzzle[];
   tiebreakerIndex: number;
-  tiebreakerCandidates: string[]; // userIds still tied, competing in sudden death
+  tiebreakerCandidates: string[];
+
+  // Ready system (quick match)
+  readySet: Set<string>;
 
   createdAt: number;
   lastActivityAt: number;

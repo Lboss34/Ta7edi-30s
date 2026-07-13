@@ -100,7 +100,7 @@ export default function OnlineLobbyScreen() {
   if (mode === 'join') {
     const handleJoin = async () => {
       const code = joinCode.trim().toUpperCase();
-      if (code.length < 4) { setError('أدخل رمز الغرفة'); return; }
+      if (code.length < 6) { setError('أدخل رمز الغرفة الصحيح (6 أحرف)'); return; }
       setError(null);
       setBusy(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -123,11 +123,11 @@ export default function OnlineLobbyScreen() {
             </View>
 
             <Ionicons name="key" size={64} color="#7B2FFF" style={{ marginVertical: 12 }} />
-            <Text style={[S.subLabel, { color: colors.mutedForeground }]}>أدخل رمز الغرفة المكوّن من 4 أحرف</Text>
+            <Text style={[S.subLabel, { color: colors.mutedForeground }]}>أدخل رمز الغرفة المكوّن من 6 أحرف</Text>
 
             <TextInput
               style={[S.codeInput, { color: '#7B2FFF', borderColor: '#7B2FFF', backgroundColor: 'rgba(123,47,255,0.08)' }]}
-              placeholder="XXXX"
+              placeholder="XXXXXX"
               placeholderTextColor="rgba(123,47,255,0.4)"
               value={joinCode}
               onChangeText={(t) => setJoinCode(t.toUpperCase())}

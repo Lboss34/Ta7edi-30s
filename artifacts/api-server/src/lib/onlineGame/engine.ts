@@ -13,18 +13,24 @@ import type {
   TransferPuzzle,
 } from "./types";
 
-const LIMITS = { round1: 6, round2: 3, round3: 8, round4: 8, round5: 4 };
-const ROUND1_TIME_MS = 6_000;       // Master Plan: "6 seconds to type"
-const ROUND2_BID_TIME_MS = 6_000;   // Master Plan: "6s to bid"
-const ROUND2_ANSWER_TIME_MS = 15_000;
-const ROUND3_BUZZ_WINDOW_MS = 20_000;
-const ROUND3_ANSWER_TIME_MS = 10_000;
-const ROUND4_TIME_MS = 10_000;
-const ROUND4_REVEAL_MS = 3_000;
-const ROUND5_BUZZ_WINDOW_MS = 25_000;
-const ROUND5_ANSWER_TIME_MS = 12_000;
+// ─── Limits & Timings ────────────────────────────────────────────────────────
+const ROUND1_QUESTIONS      = 3;     // exactly 3 questions per spec
+const ROUND1_STRIKES_MAX    = 3;     // strikes per player PER QUESTION
+const LIMITS = { round2: 3, round3: 8, round4: 8, round5: 4 };
+
+const ROUND1_TIME_MS         = 6_000;
+const ROUND2_BID_TIME_MS     = 6_000;
+const ROUND2_ANSWER_TIME_MS  = 15_000;
+const ROUND3_BUZZ_WINDOW_MS  = 20_000;
+const ROUND3_ANSWER_TIME_MS  = 10_000;
+const ROUND4_TIME_MS         = 10_000;
+const ROUND4_REVEAL_MS       = 3_000;
+const ROUND5_BUZZ_WINDOW_MS  = 25_000;
+const ROUND5_ANSWER_TIME_MS  = 12_000;
 const TIEBREAKER_BUZZ_WINDOW_MS = 30_000;
 const TIEBREAKER_ANSWER_TIME_MS = 12_000;
+
+// ─── Utility ─────────────────────────────────────────────────────────────────
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -64,10 +70,20 @@ function broadcastRoomState(io: Server, room: Room) {
   emitRoom(io, room, "room:update", { room: serializeRoom(room) });
 }
 
+function scoreMap(room: Room): Record<string, number> {
+  return Object.fromEntries(room.players.map((p) => [p.userId, p.score]));
+}
+
+function broadcastRoundStart(io: Server, room: Room, round: string) {
+  emitRoom(io, room, "game:roundStart", { round, scores: scoreMap(room) });
+}
+
+// ─── Questions loader ────────────────────────────────────────────────────────
+
 async function loadQuestions(db: Db, difficulty: string): Promise<RoomQuestions> {
   const filter = { difficulty };
   const [round1, round2, round3, round4, round5, tiebreaker] = await Promise.all([
-    db.collection("round1_questions").aggregate([{ $match: filter }, { $sample: { size: LIMITS.round1 } }]).toArray(),
+    db.collection("round1_questions").aggregate([{ $match: filter }, { $sample: { size: ROUND1_QUESTIONS } }]).toArray(),
     db.collection("round2_questions").aggregate([{ $match: filter }, { $sample: { size: LIMITS.round2 } }]).toArray(),
     db.collection("round3_questions").aggregate([{ $match: filter }, { $sample: { size: LIMITS.round3 } }]).toArray(),
     db.collection("round4_questions").aggregate([{ $match: filter }, { $sample: { size: LIMITS.round4 } }]).toArray(),
@@ -75,11 +91,11 @@ async function loadQuestions(db: Db, difficulty: string): Promise<RoomQuestions>
     db.collection("tiebreaker_questions").aggregate([{ $match: { difficulty: { $in: ["medium", "hard"] } } }, { $sample: { size: 10 } }]).toArray(),
   ]);
   return {
-    round1: round1 as unknown as PingPongQuestion[],
-    round2: round2 as unknown as AuctionTopic[],
-    round3: round3 as unknown as BuzzerQuestion[],
-    round4: round4 as unknown as RapidQuestion[],
-    round5: round5 as unknown as TransferPuzzle[],
+    round1:     round1     as unknown as PingPongQuestion[],
+    round2:     round2     as unknown as AuctionTopic[],
+    round3:     round3     as unknown as BuzzerQuestion[],
+    round4:     round4     as unknown as RapidQuestion[],
+    round5:     round5     as unknown as TransferPuzzle[],
     tiebreaker: tiebreaker as unknown as TransferPuzzle[],
   };
 }
@@ -87,22 +103,33 @@ async function loadQuestions(db: Db, difficulty: string): Promise<RoomQuestions>
 export async function startGame(io: Server, db: Db, room: Room): Promise<void> {
   room.questions = await loadQuestions(db, room.difficulty);
   room.status = "playing";
+  room.readySet.clear();
   room.players.forEach((p) => {
     p.score = 0;
     p.strikes = 0;
     p.outOfRound1 = false;
+    p.skipUsed = false;
+    p.questionStrikes = 0;
   });
   emitRoom(io, room, "game:started", { room: serializeRoom(room) });
   setupRound1(io, room);
 }
 
-// ─────────────────────────── Round 1: PingPong (turn-based) ───────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// Round 1 — "ماذا تعرف؟"  — per-question turn-based (rewritten per spec)
+//
+// • Exactly 3 questions.
+// • Players take turns answering the SAME question.
+// • Every typed answer (right or wrong) is broadcast via game:round1Answer.
+// • Each player has 3 strikes PER QUESTION (wrong answer OR timeout = 1 strike).
+// • If a player hits 3 strikes on a question, the other player wins the point.
+// • A correct answer immediately wins the point and moves to the next question.
+// ════════════════════════════════════════════════════════════════════════════
 
 function setupRound1(io: Server, room: Room) {
-  const questions = room.questions!.round1;
   room.currentRound = "round1";
   room.questionIndex = 0;
-  room.maxQuestionsThisRound = Math.min(LIMITS.round1, questions.length);
+  room.maxQuestionsThisRound = Math.min(ROUND1_QUESTIONS, room.questions!.round1.length);
   room.turnOrder = shuffle(room.players.map((p) => p.userId));
   room.turnIndex = 0;
 
@@ -114,82 +141,175 @@ function setupRound1(io: Server, room: Room) {
   askRound1Question(io, room);
 }
 
-function nextEligibleTurnIndex(room: Room, fromIndex: number): number {
-  const n = room.turnOrder.length;
-  for (let step = 1; step <= n; step++) {
-    const idx = (fromIndex + step) % n;
-    const userId = room.turnOrder[idx]!;
-    const player = room.players.find((p) => p.userId === userId);
-    if (player && !player.outOfRound1) return idx;
-  }
-  return -1;
-}
-
+/** Reset per-question state and emit the question to all players. */
 function askRound1Question(io: Server, room: Room) {
-  const anyoneLeft = room.turnOrder.some((uid) => !room.players.find((p) => p.userId === uid)?.outOfRound1);
-  if (room.questionIndex >= room.maxQuestionsThisRound || !anyoneLeft) {
+  if (room.questionIndex >= room.maxQuestionsThisRound) {
     setupRound2(io, room);
     return;
   }
 
-  const currentPlayer = room.players.find((p) => p.userId === room.turnOrder[room.turnIndex]);
-  if (!currentPlayer || currentPlayer.outOfRound1) {
-    const nextIdx = nextEligibleTurnIndex(room, room.turnIndex);
-    if (nextIdx === -1) {
-      setupRound2(io, room);
-      return;
-    }
-    room.turnIndex = nextIdx;
-  }
+  // Reset per-question strikes for every player
+  room.questionStrikes = {};
+  room.players.forEach((p) => { room.questionStrikes[p.userId] = 0; });
 
-  room.phase = "round1_turn";
+  // Find first eligible turn starting from current turnIndex (wrap around)
+  const firstIdx = findNextR1TurnIdx(room, room.turnIndex - 1);
+  if (firstIdx === -1) { setupRound2(io, room); return; }
+  room.turnIndex = firstIdx;
+
+  emitRound1Turn(io, room);
+}
+
+/** Emit the current question with the current turn's player. */
+function emitRound1Turn(io: Server, room: Room) {
   const question = room.questions!.round1[room.questionIndex]!;
+  room.phase = "round1_turn";
   room.questionDeadline = Date.now() + ROUND1_TIME_MS;
   const turnPlayer = room.players.find((p) => p.userId === room.turnOrder[room.turnIndex])!;
 
   emitRoom(io, room, "game:question", {
-    round: "round1",
-    phase: room.phase,
+    round:      "round1",
+    phase:      room.phase,
     turnUserId: turnPlayer.userId,
-    question: { id: question.id, question: question.question },
+    question:   { id: question.id, question: question.question },
     deadlineTs: room.questionDeadline,
-    scores: scoreMap(room),
+    scores:     scoreMap(room),
+    questionIndex: room.questionIndex,
+    questionStrikes: { ...room.questionStrikes },
   });
 
-  schedule(room, ROUND1_TIME_MS, () => resolveRound1(io, room, turnPlayer.userId, null));
+  schedule(room, ROUND1_TIME_MS, () => handleRound1Turn(io, room, turnPlayer.userId, null));
 }
 
-function resolveRound1(io: Server, room: Room, userId: string, submittedText: string | null) {
+/** Return the next eligible turn index (a player who has < 3 strikes on this question). */
+function findNextR1TurnIdx(room: Room, fromIndex: number): number {
+  const n = room.turnOrder.length;
+  for (let step = 1; step <= n; step++) {
+    const idx = (fromIndex + step) % n;
+    const uid = room.turnOrder[idx]!;
+    const strikes = room.questionStrikes[uid] ?? 0;
+    if (strikes < ROUND1_STRIKES_MAX) return idx;
+  }
+  return -1; // everyone used all their strikes (shouldn't happen with 2 players)
+}
+
+/** Called when a player submits an answer (or timeout fires with null). */
+function handleRound1Turn(io: Server, room: Room, userId: string, submittedText: string | null) {
   if (room.phase !== "round1_turn") return;
   const turnPlayer = room.players.find((p) => p.userId === room.turnOrder[room.turnIndex]);
   if (!turnPlayer || turnPlayer.userId !== userId) return;
 
   const question = room.questions!.round1[room.questionIndex]!;
-  const correct = submittedText !== null && isAnswerCorrect(submittedText, question.validAnswers);
+  const correct  = submittedText !== null && isAnswerCorrect(submittedText, question.validAnswers);
 
-  if (correct) {
-    turnPlayer.score += 1;
-  } else {
-    turnPlayer.strikes += 1;
-    if (turnPlayer.strikes >= 3) turnPlayer.outOfRound1 = true;
-  }
-
-  emitRoom(io, room, "game:answerResult", {
-    round: "round1",
-    userId: turnPlayer.userId,
-    submittedText,
+  // Broadcast this answer attempt to BOTH players (spec: every answer must be visible)
+  emitRoom(io, room, "game:round1Answer", {
+    userId:          turnPlayer.userId,
+    text:            submittedText ?? "(انتهى الوقت)",
     correct,
-    correctAnswer: question.validAnswers[0] ?? "",
-    scores: scoreMap(room),
-    strikes: turnPlayer.strikes,
-    outOfRound1: turnPlayer.outOfRound1,
+    questionIndex:   room.questionIndex,
+    questionStrikes: { ...room.questionStrikes },
   });
 
-  room.questionIndex += 1;
-  const nextIdx = nextEligibleTurnIndex(room, room.turnIndex);
-  if (nextIdx !== -1) room.turnIndex = nextIdx;
+  if (correct) {
+    // This player wins the point for this question
+    turnPlayer.score += 1;
+    emitRoom(io, room, "game:answerResult", {
+      round:         "round1",
+      userId:        turnPlayer.userId,
+      submittedText,
+      correct:       true,
+      correctAnswer: question.validAnswers[0] ?? "",
+      scores:        scoreMap(room),
+      questionStrikes: { ...room.questionStrikes },
+    });
+    room.questionIndex += 1;
+    // Rotate so the next question starts with the other player
+    const nextIdx = findNextR1TurnIdx(room, room.turnIndex);
+    if (nextIdx !== -1) room.turnIndex = nextIdx;
+    setTimeout(() => askRound1Question(io, room), 1800);
+    return;
+  }
 
-  setTimeout(() => askRound1Question(io, room), 1500);
+  // Wrong / timeout — add a strike for this player on this question
+  room.questionStrikes[userId] = (room.questionStrikes[userId] ?? 0) + 1;
+  const myStrikes = room.questionStrikes[userId]!;
+
+  if (myStrikes >= ROUND1_STRIKES_MAX) {
+    // This player exhausted all strikes → opponent wins the point
+    const opponentId = room.turnOrder.find((uid) =>
+      uid !== userId && (room.questionStrikes[uid] ?? 0) < ROUND1_STRIKES_MAX,
+    ) ?? null;
+
+    if (opponentId) {
+      const opponent = room.players.find((p) => p.userId === opponentId);
+      if (opponent) opponent.score += 1;
+    }
+
+    emitRoom(io, room, "game:answerResult", {
+      round:           "round1",
+      userId:          opponentId,   // winner by forfeit (null if both exhausted)
+      submittedText,
+      correct:         false,
+      correctAnswer:   question.validAnswers[0] ?? "",
+      scores:          scoreMap(room),
+      questionStrikes: { ...room.questionStrikes },
+      strikeOut:       true,         // signal: question ended by strike-out
+    });
+
+    room.questionIndex += 1;
+    const nextIdx = findNextR1TurnIdx(room, room.turnIndex);
+    if (nextIdx !== -1) room.turnIndex = nextIdx;
+    setTimeout(() => askRound1Question(io, room), 1800);
+    return;
+  }
+
+  // Still have strikes left — pass turn to the next eligible player on this question
+  const nextIdx = findNextR1TurnIdx(room, room.turnIndex);
+  if (nextIdx === -1) {
+    // Edge: no one can answer (shouldn't happen with 2 players unless both at 3 strikes)
+    room.questionIndex += 1;
+    setTimeout(() => askRound1Question(io, room), 1000);
+    return;
+  }
+  room.turnIndex = nextIdx;
+  // Short pause, then emit the same question with new turn
+  setTimeout(() => emitRound1Turn(io, room), 1000);
+}
+
+export function resolveRound1FromSubmit(io: Server, room: Room, userId: string, text: string) {
+  if (room.phase !== "round1_turn") return;
+  const turnPlayer = room.players.find((p) => p.userId === room.turnOrder[room.turnIndex]);
+  if (!turnPlayer || turnPlayer.userId !== userId) return;
+  clearTimer(room);
+  handleRound1Turn(io, room, userId, text);
+}
+
+export function handleSkip(io: Server, room: Room, userId: string) {
+  // Skip is only valid in Round 1 for the current turn player
+  if (room.phase !== "round1_turn") return;
+  const turnPlayer = room.players.find((p) => p.userId === room.turnOrder[room.turnIndex]);
+  if (!turnPlayer || turnPlayer.userId !== userId || turnPlayer.skipUsed) return;
+  turnPlayer.skipUsed = true;
+  clearTimer(room);
+  // Treat a skip as a timeout (null answer) — does NOT consume a strike in the new system
+  // Just pass the turn to the next player without adding a strike
+  emitRoom(io, room, "game:round1Answer", {
+    userId:          turnPlayer.userId,
+    text:            "(تخطّى)",
+    correct:         false,
+    skipped:         true,
+    questionIndex:   room.questionIndex,
+    questionStrikes: { ...room.questionStrikes },
+  });
+  const nextIdx = findNextR1TurnIdx(room, room.turnIndex);
+  if (nextIdx === -1) {
+    room.questionIndex += 1;
+    setTimeout(() => askRound1Question(io, room), 1000);
+    return;
+  }
+  room.turnIndex = nextIdx;
+  setTimeout(() => emitRound1Turn(io, room), 800);
 }
 
 // ─────────────────────────── Round 2: Auction ───────────────────────────
@@ -219,11 +339,11 @@ function askRound2Topic(io: Server, room: Room) {
   room.biddingDeadline = Date.now() + ROUND2_BID_TIME_MS;
 
   emitRoom(io, room, "game:question", {
-    round: "round2",
-    phase: room.phase,
-    question: { id: topic.id, category: topic.category, description: topic.description },
+    round:      "round2",
+    phase:      room.phase,
+    question:   { id: topic.id, category: topic.category, description: topic.description },
     deadlineTs: room.biddingDeadline,
-    scores: scoreMap(room),
+    scores:     scoreMap(room),
   });
 
   schedule(room, ROUND2_BID_TIME_MS, () => closeBidding(io, room));
@@ -256,8 +376,8 @@ function closeBidding(io: Server, room: Room) {
   room.questionDeadline = Date.now() + ROUND2_ANSWER_TIME_MS;
   emitRoom(io, room, "game:auctionWon", {
     winnerUserId: room.auctionWinnerUserId,
-    amount: room.currentBid.amount,
-    deadlineTs: room.questionDeadline,
+    amount:       room.currentBid.amount,
+    deadlineTs:   room.questionDeadline,
   });
   schedule(room, ROUND2_ANSWER_TIME_MS, () => resolveRound2Answer(io, room, room.auctionWinnerUserId!, null));
 }
@@ -272,31 +392,31 @@ function resolveRound2Answer(io: Server, room: Room, userId: string, submittedTe
   player.score = correct ? player.score + bidAmount : Math.max(0, player.score - bidAmount);
 
   emitRoom(io, room, "game:answerResult", {
-    round: "round2",
+    round:         "round2",
     userId,
     submittedText,
     correct,
     correctAnswer: topic.possibleAnswers[0] ?? "",
-    scores: scoreMap(room),
+    scores:        scoreMap(room),
   });
 
   room.questionIndex += 1;
   setTimeout(() => askRound2Topic(io, room), 1500);
 }
 
-// ─────────────────────────── Generic buzzer round (Round 3 / Round 5 / Tiebreaker) ───────────────────────────
+// ─────────────────────────── Generic buzzer round ───────────────────────────
 
 interface BuzzerRoundConfig {
-  roundKey: "round3" | "round5" | "tiebreaker";
-  buzzPhase: "round3_buzz" | "round5_buzz" | "tiebreaker_buzz";
-  answerPhase: "round3_answer" | "round5_answer" | "tiebreaker_answer";
-  buzzWindowMs: number;
-  answerTimeMs: number;
-  pointValue: number;
+  roundKey:          "round3" | "round5" | "tiebreaker";
+  buzzPhase:         "round3_buzz" | "round5_buzz" | "tiebreaker_buzz";
+  answerPhase:       "round3_answer" | "round5_answer" | "tiebreaker_answer";
+  buzzWindowMs:      number;
+  answerTimeMs:      number;
+  pointValue:        number;
   getQuestionPublic: (q: BuzzerQuestion | TransferPuzzle) => Record<string, unknown>;
-  getValidAnswers: (q: BuzzerQuestion | TransferPuzzle) => string[];
-  eligibleUserIds: (room: Room) => string[];
-  onQuestionResolved: (io: Server, room: Room, winnerUserId: string | null, correct: boolean) => void;
+  getValidAnswers:   (q: BuzzerQuestion | TransferPuzzle) => string[];
+  eligibleUserIds:   (room: Room) => string[];
+  onQuestionResolved:(io: Server, room: Room, winnerUserId: string | null, correct: boolean) => void;
 }
 
 function askBuzzerQuestion(io: Server, room: Room, question: BuzzerQuestion | TransferPuzzle, cfg: BuzzerRoundConfig) {
@@ -306,11 +426,11 @@ function askBuzzerQuestion(io: Server, room: Room, question: BuzzerQuestion | Tr
   room.questionDeadline = Date.now() + cfg.buzzWindowMs;
 
   emitRoom(io, room, "game:question", {
-    round: cfg.roundKey,
-    phase: room.phase,
-    question: cfg.getQuestionPublic(question),
+    round:      cfg.roundKey,
+    phase:      room.phase,
+    question:   cfg.getQuestionPublic(question),
     deadlineTs: room.questionDeadline,
-    scores: scoreMap(room),
+    scores:     scoreMap(room),
   });
 
   schedule(room, cfg.buzzWindowMs, () => {
@@ -322,7 +442,7 @@ function askBuzzerQuestion(io: Server, room: Room, question: BuzzerQuestion | Tr
 
 export function buzz(room: Room, io: Server, userId: string, cfg: BuzzerRoundConfig) {
   if (room.phase !== cfg.buzzPhase) return;
-  if (room.buzzLock) return; // someone already locked
+  if (room.buzzLock) return;
   if (room.excludedFromBuzz.has(userId)) return;
   if (!cfg.eligibleUserIds(room).includes(userId)) return;
   const player = room.players.find((p) => p.userId === userId && p.connected);
@@ -357,23 +477,23 @@ export function resolveBuzzerAnswer(
     const player = room.players.find((p) => p.userId === userId)!;
     player.score += cfg.pointValue;
     emitRoom(io, room, "game:answerResult", {
-      round: cfg.roundKey,
+      round:         cfg.roundKey,
       userId,
       submittedText,
-      correct: true,
+      correct:       true,
       correctAnswer: cfg.getValidAnswers(question)[0] ?? "",
-      scores: scoreMap(room),
+      scores:        scoreMap(room),
     });
     revealBuzzerAnswer(io, room, question, cfg, userId, true);
     return;
   }
 
   emitRoom(io, room, "game:answerResult", {
-    round: cfg.roundKey,
+    round:   cfg.roundKey,
     userId,
     submittedText,
     correct: false,
-    scores: scoreMap(room),
+    scores:  scoreMap(room),
   });
 
   room.excludedFromBuzz.add(userId);
@@ -398,24 +518,26 @@ function revealBuzzerAnswer(
   correct: boolean,
 ) {
   emitRoom(io, room, "game:questionReveal", {
-    round: cfg.roundKey,
+    round:         cfg.roundKey,
     correctAnswer: cfg.getValidAnswers(question)[0] ?? "",
   });
   cfg.onQuestionResolved(io, room, winnerUserId, correct);
 }
 
+// ─── Round 3 ─────────────────────────────────────────────────────────────────
+
 function round3Config(): BuzzerRoundConfig {
   return {
-    roundKey: "round3",
-    buzzPhase: "round3_buzz",
-    answerPhase: "round3_answer",
-    buzzWindowMs: ROUND3_BUZZ_WINDOW_MS,
-    answerTimeMs: ROUND3_ANSWER_TIME_MS,
-    pointValue: 2,
+    roundKey:          "round3",
+    buzzPhase:         "round3_buzz",
+    answerPhase:       "round3_answer",
+    buzzWindowMs:      ROUND3_BUZZ_WINDOW_MS,
+    answerTimeMs:      ROUND3_ANSWER_TIME_MS,
+    pointValue:        2,
     getQuestionPublic: (q) => ({ id: q.id, question: (q as BuzzerQuestion).question, choices: (q as BuzzerQuestion).choices }),
-    getValidAnswers: (q) => [(q as BuzzerQuestion).answer],
-    eligibleUserIds: (room) => connectedActive(room).map((p) => p.userId),
-    onQuestionResolved: (io, room) => {
+    getValidAnswers:   (q) => [(q as BuzzerQuestion).answer],
+    eligibleUserIds:   (room) => connectedActive(room).map((p) => p.userId),
+    onQuestionResolved:(io, room) => {
       room.questionIndex += 1;
       setTimeout(() => askRound3Question(io, room), 1500);
     },
@@ -427,54 +549,42 @@ function setupRound3(io: Server, room: Room) {
   room.currentRound = "round3";
   room.questionIndex = 0;
   room.maxQuestionsThisRound = Math.min(LIMITS.round3, questions.length);
-  if (room.maxQuestionsThisRound === 0) {
-    setupRound4(io, room);
-    return;
-  }
+  if (room.maxQuestionsThisRound === 0) { setupRound4(io, room); return; }
   broadcastRoundStart(io, room, "round3");
   askRound3Question(io, room);
 }
 
 function askRound3Question(io: Server, room: Room) {
-  if (room.questionIndex >= room.maxQuestionsThisRound) {
-    setupRound4(io, room);
-    return;
-  }
+  if (room.questionIndex >= room.maxQuestionsThisRound) { setupRound4(io, room); return; }
   const question = room.questions!.round3[room.questionIndex]!;
   askBuzzerQuestion(io, room, question, round3Config());
 }
 
-// ─────────────────────────── Round 4: Rapid Fire (simultaneous) ───────────────────────────
+// ─── Round 4: Rapid Fire ────────────────────────────────────────────────────
 
 function setupRound4(io: Server, room: Room) {
   const questions = room.questions!.round4;
   room.currentRound = "round4";
   room.questionIndex = 0;
   room.maxQuestionsThisRound = Math.min(LIMITS.round4, questions.length);
-  if (room.maxQuestionsThisRound === 0) {
-    setupRound5(io, room);
-    return;
-  }
+  if (room.maxQuestionsThisRound === 0) { setupRound5(io, room); return; }
   broadcastRoundStart(io, room, "round4");
   askRound4Question(io, room);
 }
 
 function askRound4Question(io: Server, room: Room) {
-  if (room.questionIndex >= room.maxQuestionsThisRound) {
-    setupRound5(io, room);
-    return;
-  }
+  if (room.questionIndex >= room.maxQuestionsThisRound) { setupRound5(io, room); return; }
   const question = room.questions!.round4[room.questionIndex]!;
   room.phase = "round4_question";
   room.simultaneousAnswers = new Map();
   room.questionDeadline = Date.now() + ROUND4_TIME_MS;
 
   emitRoom(io, room, "game:question", {
-    round: "round4",
-    phase: room.phase,
-    question: { id: question.id, question: question.question },
+    round:      "round4",
+    phase:      room.phase,
+    question:   { id: question.id, question: question.question },
     deadlineTs: room.questionDeadline,
-    scores: scoreMap(room),
+    scores:     scoreMap(room),
   });
 
   schedule(room, ROUND4_TIME_MS, () => revealRound4(io, room));
@@ -489,7 +599,7 @@ export function submitRound4Answer(room: Room, io: Server, userId: string, text:
   const question = room.questions!.round4[room.questionIndex]!;
   const correct = isAnswerCorrect(text, [question.answer]);
   room.simultaneousAnswers.set(userId, { userId, text, correct, submittedAt: Date.now() });
-  emitToPlayer(io, room, userId, "game:answerAck", { correct: null }); // ack receipt only, correctness revealed together
+  emitToPlayer(io, room, userId, "game:answerAck", { correct: null });
 
   const eligible = connectedActive(room);
   if (eligible.every((p) => room.simultaneousAnswers.has(p.userId))) {
@@ -525,20 +635,20 @@ function revealRound4(io: Server, room: Room) {
   setTimeout(() => askRound4Question(io, room), ROUND4_REVEAL_MS);
 }
 
-// ─────────────────────────── Round 5: Transfer Puzzle (buzzer race) ───────────────────────────
+// ─── Round 5: Transfer Puzzle ────────────────────────────────────────────────
 
 function round5Config(): BuzzerRoundConfig {
   return {
-    roundKey: "round5",
-    buzzPhase: "round5_buzz",
-    answerPhase: "round5_answer",
-    buzzWindowMs: ROUND5_BUZZ_WINDOW_MS,
-    answerTimeMs: ROUND5_ANSWER_TIME_MS,
-    pointValue: 3,
+    roundKey:          "round5",
+    buzzPhase:         "round5_buzz",
+    answerPhase:       "round5_answer",
+    buzzWindowMs:      ROUND5_BUZZ_WINDOW_MS,
+    answerTimeMs:      ROUND5_ANSWER_TIME_MS,
+    pointValue:        3,
     getQuestionPublic: (q) => ({ id: q.id, transfers: (q as TransferPuzzle).transfers }),
-    getValidAnswers: (q) => [(q as TransferPuzzle).answer],
-    eligibleUserIds: (room) => connectedActive(room).map((p) => p.userId),
-    onQuestionResolved: (io, room) => {
+    getValidAnswers:   (q) => [(q as TransferPuzzle).answer],
+    eligibleUserIds:   (room) => connectedActive(room).map((p) => p.userId),
+    onQuestionResolved:(io, room) => {
       room.questionIndex += 1;
       setTimeout(() => askRound5Question(io, room), 1500);
     },
@@ -550,28 +660,18 @@ function setupRound5(io: Server, room: Room) {
   room.currentRound = "round5";
   room.questionIndex = 0;
   room.maxQuestionsThisRound = Math.min(LIMITS.round5, puzzles.length);
-  if (room.maxQuestionsThisRound === 0) {
-    finishGame(io, room);
-    return;
-  }
+  if (room.maxQuestionsThisRound === 0) { finishGame(io, room); return; }
   broadcastRoundStart(io, room, "round5");
   askRound5Question(io, room);
 }
 
 function askRound5Question(io: Server, room: Room) {
-  if (room.questionIndex >= room.maxQuestionsThisRound) {
-    finishGame(io, room);
-    return;
-  }
+  if (room.questionIndex >= room.maxQuestionsThisRound) { finishGame(io, room); return; }
   const puzzle = room.questions!.round5[room.questionIndex]!;
   askBuzzerQuestion(io, room, puzzle, round5Config());
 }
 
-// ─────────────────────────── Game end + Tiebreaker (sudden death) ───────────────────────────
-
-function scoreMap(room: Room): Record<string, number> {
-  return Object.fromEntries(room.players.map((p) => [p.userId, p.score]));
-}
+// ─── Game end + Tiebreaker ────────────────────────────────────────────────────
 
 function finishGame(io: Server, room: Room) {
   const maxScore = Math.max(...room.players.map((p) => p.score));
@@ -582,9 +682,9 @@ function finishGame(io: Server, room: Room) {
     room.currentRound = null;
     room.phase = "game_over";
     emitRoom(io, room, "game:over", {
-      scores: scoreMap(room),
+      scores:       scoreMap(room),
       winnerUserId: tied[0]?.userId ?? null,
-      tied: tied.length > 1 ? tied.map((p) => p.userId) : [],
+      tied:         tied.length > 1 ? tied.map((p) => p.userId) : [],
     });
     return;
   }
@@ -599,24 +699,24 @@ function finishGame(io: Server, room: Room) {
 
 function tiebreakerConfig(): BuzzerRoundConfig {
   return {
-    roundKey: "tiebreaker",
-    buzzPhase: "tiebreaker_buzz",
-    answerPhase: "tiebreaker_answer",
-    buzzWindowMs: TIEBREAKER_BUZZ_WINDOW_MS,
-    answerTimeMs: TIEBREAKER_ANSWER_TIME_MS,
-    pointValue: 0,
+    roundKey:          "tiebreaker",
+    buzzPhase:         "tiebreaker_buzz",
+    answerPhase:       "tiebreaker_answer",
+    buzzWindowMs:      TIEBREAKER_BUZZ_WINDOW_MS,
+    answerTimeMs:      TIEBREAKER_ANSWER_TIME_MS,
+    pointValue:        0,
     getQuestionPublic: (q) => ({ id: q.id, transfers: (q as TransferPuzzle).transfers }),
-    getValidAnswers: (q) => [(q as TransferPuzzle).answer],
-    eligibleUserIds: (room) => room.tiebreakerCandidates,
-    onQuestionResolved: (io, room, winnerUserId, correct) => {
+    getValidAnswers:   (q) => [(q as TransferPuzzle).answer],
+    eligibleUserIds:   (room) => room.tiebreakerCandidates,
+    onQuestionResolved:(io, room, winnerUserId, correct) => {
       if (correct && winnerUserId) {
         room.status = "finished";
         room.phase = "game_over";
         emitRoom(io, room, "game:over", {
-          scores: scoreMap(room),
+          scores:               scoreMap(room),
           winnerUserId,
-          tied: [],
-          decidedByTiebreaker: true,
+          tied:                 [],
+          decidedByTiebreaker:  true,
         });
         return;
       }
@@ -625,9 +725,9 @@ function tiebreakerConfig(): BuzzerRoundConfig {
         room.status = "finished";
         room.phase = "game_over";
         emitRoom(io, room, "game:over", {
-          scores: scoreMap(room),
+          scores:       scoreMap(room),
           winnerUserId: null,
-          tied: room.tiebreakerCandidates,
+          tied:         room.tiebreakerCandidates,
           decidedByTiebreaker: false,
         });
         return;
@@ -642,16 +742,12 @@ function askTiebreakerQuestion(io: Server, room: Room) {
   askBuzzerQuestion(io, room, puzzle, tiebreakerConfig());
 }
 
-// ─────────────────────────── Shared dispatch entry points (called from socket handlers) ───────────────────────────
-
-function broadcastRoundStart(io: Server, room: Room, round: string) {
-  emitRoom(io, room, "game:roundStart", { round, scores: scoreMap(room) });
-}
+// ─── Shared dispatch entry points (from socket handlers) ─────────────────────
 
 export function handleSubmitAnswer(io: Server, room: Room, userId: string, text: string) {
   switch (room.currentRound) {
     case "round1":
-      resolveRound1(io, room, userId, text);
+      resolveRound1FromSubmit(io, room, userId, text);
       return;
     case "round2":
       resolveRound2Answer(io, room, userId, text);
@@ -678,37 +774,19 @@ export function handleSubmitAnswer(io: Server, room: Room, userId: string, text:
 }
 
 export function handleBuzz(io: Server, room: Room, userId: string) {
-  if (room.currentRound === "round3") buzz(room, io, userId, round3Config());
+  if (room.currentRound === "round3")      buzz(room, io, userId, round3Config());
   else if (room.currentRound === "round5") buzz(room, io, userId, round5Config());
   else if (room.currentRound === "tiebreaker") buzz(room, io, userId, tiebreakerConfig());
 }
 
-export function handleSkip(io: Server, room: Room, userId: string) {
-  if (room.phase !== "round1_turn") return;
-  const turnPlayer = room.players.find((p) => p.userId === room.turnOrder[room.turnIndex]);
-  if (!turnPlayer || turnPlayer.userId !== userId || turnPlayer.skipUsed) return;
-  turnPlayer.skipUsed = true;
-  emitRoom(io, room, "game:answerResult", {
-    round: "round1",
-    userId,
-    submittedText: null,
-    correct: false,
-    skipped: true,
-    scores: scoreMap(room),
-  });
-  room.questionIndex += 1;
-  const nextIdx = nextEligibleTurnIndex(room, room.turnIndex);
-  if (nextIdx !== -1) room.turnIndex = nextIdx;
-  setTimeout(() => askRound1Question(io, room), 1000);
-}
-
-/** Full state snapshot for a reconnecting client — best-effort current question replay. */
+/** Full state snapshot for a reconnecting client. */
 export function buildStateSnapshot(room: Room) {
   return {
-    room: serializeRoom(room),
-    questionDeadline: room.questionDeadline,
-    buzzLock: room.buzzLock ? { userId: room.buzzLock.userId } : null,
+    room:                serializeRoom(room),
+    questionDeadline:    room.questionDeadline,
+    buzzLock:            room.buzzLock ? { userId: room.buzzLock.userId } : null,
     auctionWinnerUserId: room.auctionWinnerUserId,
-    currentBid: room.currentBid,
+    currentBid:          room.currentBid,
+    questionStrikes:     room.questionStrikes,
   };
 }

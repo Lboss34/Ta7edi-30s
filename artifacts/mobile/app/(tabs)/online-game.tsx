@@ -25,6 +25,7 @@ import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useOnlineGame, type OnlinePlayer } from '@/contexts/OnlineGameContext';
 import { addLeaderboardEntry } from '@/lib/leaderboard';
+import { useSoundContext } from '@/contexts/SoundContext';
 
 const { width: W } = Dimensions.get('window');
 const PLAYER_COLORS = ['#7B2FFF', '#FFD700', '#00E5FF', '#FF6B00', '#00C853'];
@@ -194,7 +195,7 @@ const RO = StyleSheet.create({
 // ── Round transition ───────────────────────────────────────────────────────────
 
 const ROUND_META: Record<string, { title: string; sub: string; color: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  round1: { title: 'ماذا تعرف؟',   sub: 'بالتناوب — 6 ثوانٍ لكل إجابة', color: '#7B2FFF', icon: 'help-circle'   },
+  round1: { title: 'ماذا تعرف؟',   sub: 'بالتناوب — 3 أسئلة، 3 ضربات لكل سؤال', color: '#7B2FFF', icon: 'help-circle'   },
   round2: { title: 'المزاد',        sub: 'زايد واربح الموضوع!',            color: '#FFD700', icon: 'cash'          },
   round3: { title: 'الجرس',         sub: 'اضغط أول وأجب!',                 color: '#FF6B00', icon: 'radio-button-on' },
   round4: { title: 'تحدي الثلاثين', sub: 'الجميع يجيب في آنٍ واحد',        color: '#FF3B3B', icon: 'flash'         },
@@ -232,12 +233,78 @@ const T = StyleSheet.create({
   sub: { fontSize: 15, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 24 },
 });
 
-// ── Round 1: PingPong (turn-based) ─────────────────────────────────────────────
+// ── Round 1: Turn-based — 3 Qs, 3 strikes per question ────────────────────────
+//
+// Per spec (Task 4):
+// • Players take turns on the SAME question.
+// • ALL typed answers are broadcast to BOTH players via game:round1Answer.
+// • Each player has 3 strikes PER QUESTION (tracked in question.questionStrikes).
+// • Correct answer → winner gets point, next question.
+// • 3 strikes for one player → other player wins point.
+
+function Round1AnswerFeed() {
+  const { state } = useOnlineGame();
+  const answers = state.round1Answers;
+  if (!answers || answers.length === 0) return null;
+  // Show last 5 answers (most recent at top)
+  const recent = [...answers].slice(-5).reverse();
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={{ color: '#FFFFFF55', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2, textAlign: 'right' }}>
+        سجل الإجابات
+      </Text>
+      {recent.map((a, i) => {
+        const pColor = PLAYER_COLORS[
+          (state.room?.players.findIndex(p => p.userId === a.userId) ?? 0) % PLAYER_COLORS.length
+        ] ?? '#7B2FFF';
+        const pName = playerName(state.room, a.userId);
+        const icon  = a.skipped ? '⏭' : a.correct ? '✅' : '❌';
+        const color = a.skipped ? '#FF6B00' : a.correct ? '#00C853' : '#FF3B3B';
+        return (
+          <View key={i} style={[R1.feedRow, { borderColor: `${color}33`, backgroundColor: `${color}09`, opacity: i === 0 ? 1 : 0.55 + 0.1 * (5 - i) }]}>
+            <Text style={{ fontSize: 14 }}>{icon}</Text>
+            <Text style={[R1.feedName, { color: pColor }]}>{pName}</Text>
+            <Text style={[R1.feedText, { color: a.correct ? '#00C853' : '#FFFFFF99' }]} numberOfLines={1}>{a.text}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function PerQuestionStrikes() {
+  const { state } = useOnlineGame();
+  const questionStrikes = state.question?.questionStrikes ?? {};
+  if (!state.room) return null;
+  return (
+    <View style={R1.strikesRow}>
+      {state.room.players.map((p, i) => {
+        const pc = PLAYER_COLORS[i % PLAYER_COLORS.length] ?? '#7B2FFF';
+        const strikes = questionStrikes[p.userId] ?? 0;
+        return (
+          <View key={p.userId} style={[R1.strikeChip, { borderColor: `${pc}55` }]}>
+            <Text style={R1.strikeAvatar}>{p.avatar || '🎮'}</Text>
+            <View style={{ flexDirection: 'row', gap: 3 }}>
+              {[0, 1, 2].map(j => (
+                <Ionicons
+                  key={j}
+                  name={j < strikes ? 'close-circle' : 'ellipse-outline'}
+                  size={14}
+                  color={j < strikes ? '#FF3B3B' : `${pc}66`}
+                />
+              ))}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
 
 function Round1UI() {
   const { state, myUserId, submitAnswer, skip } = useOnlineGame();
   const colors = useColors();
-  const [text, setText]         = useState('');
+  const [text, setText]           = useState('');
   const [submitted, setSubmitted] = useState(false);
   const secs = useCountdown(state.deadlineTs);
 
@@ -246,9 +313,14 @@ function Round1UI() {
   const turnName  = playerName(state.room, state.turnUserId ?? '');
   const myPlayer  = state.room?.players.find(p => p.userId === myUserId);
   const canSkip   = isMyTurn && !submitted && !myPlayer?.skipUsed;
+  const qIndex    = (state.question?.questionIndex ?? 0) + 1;
+  const qTotal    = 3;
 
-  // Reset when new question arrives
-  useEffect(() => { setText(''); setSubmitted(false); }, [state.question?.id]);
+  // Reset input on new TURN (turnUserId changes) or new question ID
+  useEffect(() => {
+    setText('');
+    setSubmitted(false);
+  }, [state.question?.id, state.turnUserId]);
 
   const handleSubmit = () => {
     if (!text.trim() || !isMyTurn || submitted) return;
@@ -267,6 +339,14 @@ function Round1UI() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={[R1.content]} keyboardShouldPersistTaps="handled">
+
+        {/* Question progress */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          {Array.from({ length: qTotal }).map((_, i) => (
+            <View key={i} style={{ width: 24, height: 5, borderRadius: 3, backgroundColor: i < (qIndex - 1) ? '#7B2FFF' : i === qIndex - 1 ? '#A569FF' : '#FFFFFF18' }} />
+          ))}
+        </View>
+
         {/* Turn indicator */}
         <View style={[R1.turnBanner, { borderColor: turnColor, backgroundColor: `${turnColor}14` }]}>
           <Ionicons name="person" size={16} color={turnColor} />
@@ -278,12 +358,15 @@ function Round1UI() {
 
         {/* Question */}
         <View style={[R1.qCard, { backgroundColor: colors.card, borderColor: '#7B2FFF' }]}>
-          <Text style={[R1.qLabel, { color: '#7B2FFF' }]}>السؤال</Text>
+          <Text style={[R1.qLabel, { color: '#7B2FFF' }]}>السؤال {qIndex} من {qTotal}</Text>
           <Text style={[R1.qTxt, { color: colors.foreground }]}>{state.question?.question ?? '...'}</Text>
         </View>
 
-        {/* Strikes (Round 1) */}
-        <StrikesRow />
+        {/* Per-question strikes */}
+        <PerQuestionStrikes />
+
+        {/* Live answer feed (all answers broadcast to both players) */}
+        <Round1AnswerFeed />
 
         {/* My turn: input */}
         {isMyTurn && !submitted && (
@@ -338,19 +421,18 @@ function Round1UI() {
   );
 }
 
+// Legacy StrikesRow kept but not used in Round1 anymore (used outside if needed)
 function StrikesRow() {
-  const { state, myUserId } = useOnlineGame();
-  const colors = useColors();
+  const { state } = useOnlineGame();
   if (!state.room) return null;
   return (
     <View style={R1.strikesRow}>
       {state.room.players.map((p, i) => {
         const pc = PLAYER_COLORS[i % PLAYER_COLORS.length] ?? '#7B2FFF';
         const strikes = p.strikes ?? 0;
-        const out = p.outOfRound1;
         return (
-          <View key={p.userId} style={[R1.strikeChip, { borderColor: `${pc}55`, opacity: out ? 0.4 : 1 }]}>
-            <Text style={[R1.strikeAvatar]}>{p.avatar || '🎮'}</Text>
+          <View key={p.userId} style={[R1.strikeChip, { borderColor: `${pc}55` }]}>
+            <Text style={R1.strikeAvatar}>{p.avatar || '🎮'}</Text>
             <View style={{ flexDirection: 'row', gap: 2 }}>
               {[0, 1, 2].map(j => (
                 <Ionicons key={j} name={j < strikes ? 'close-circle' : 'ellipse-outline'} size={12} color={j < strikes ? '#FF3B3B' : `${pc}88`} />
@@ -364,24 +446,29 @@ function StrikesRow() {
 }
 
 const R1 = StyleSheet.create({
-  content: { padding: 16, gap: 14 },
+  content:    { padding: 16, gap: 14 },
   turnBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 16, borderWidth: 1.5, paddingVertical: 12, paddingHorizontal: 16 },
-  turnTxt: { fontSize: 15, fontFamily: 'Inter_700Bold', flex: 1, marginHorizontal: 8 },
-  qCard: { borderRadius: 20, borderWidth: 1.5, padding: 20, gap: 8, alignItems: 'flex-end' },
-  qLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.5 },
-  qTxt: { fontSize: 22, fontFamily: 'Inter_600SemiBold', textAlign: 'right', lineHeight: 34 },
+  turnTxt:    { fontSize: 15, fontFamily: 'Inter_700Bold', flex: 1, marginHorizontal: 8 },
+  qCard:      { borderRadius: 20, borderWidth: 1.5, padding: 20, gap: 8, alignItems: 'flex-end' },
+  qLabel:     { fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.5 },
+  qTxt:       { fontSize: 22, fontFamily: 'Inter_600SemiBold', textAlign: 'right', lineHeight: 34 },
   strikesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   strikeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10 },
   strikeAvatar: { fontSize: 18 },
-  input: { borderWidth: 1.5, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, fontSize: 18, fontFamily: 'Inter_600SemiBold', textAlign: 'right' },
-  submitBtn: { paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  // Answer feed
+  feedRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 10, borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10 },
+  feedName:   { fontSize: 12, fontFamily: 'Inter_700Bold', minWidth: 60 },
+  feedText:   { fontSize: 12, fontFamily: 'Inter_500Medium', flex: 1, textAlign: 'right' },
+  // Input
+  input:      { borderWidth: 1.5, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, fontSize: 18, fontFamily: 'Inter_600SemiBold', textAlign: 'right' },
+  submitBtn:  { paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   submitBtnTxt: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#FFF' },
-  skipBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1, paddingVertical: 10 },
+  skipBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1, paddingVertical: 10 },
   skipBtnTxt: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#FF6B00' },
   waitBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, borderWidth: 1, paddingVertical: 16 },
-  waitTxt: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
-  watchBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, borderWidth: 1.5, paddingVertical: 16 },
-  watchTxt: { fontSize: 15, fontFamily: 'Inter_700Bold' },
+  waitTxt:    { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  watchBanner:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, borderWidth: 1.5, paddingVertical: 16 },
+  watchTxt:   { fontSize: 15, fontFamily: 'Inter_700Bold' },
 });
 
 // ── Round 2: Auction ───────────────────────────────────────────────────────────
@@ -1034,6 +1121,56 @@ export default function OnlineGameScreen() {
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const topPad  = Platform.OS === 'web' ? 67 : insets.top;
+  const sounds  = useSoundContext();
+
+  // ── Task 5: Sound effects tied to socket events ──────────────────────────
+  // Correct / wrong on every answer result (round1Answer & answerResult)
+  const lastResultRef = useRef(state.lastResult);
+  useEffect(() => {
+    const r = state.lastResult;
+    if (!r || r === lastResultRef.current) return;
+    lastResultRef.current = r;
+    if (r.correct) {
+      try { sounds?.correctPlayer?.play(); } catch (_) {}
+    } else if (!r.skipped) {
+      try { sounds?.wrongPlayer?.play(); } catch (_) {}
+    }
+  }, [state.lastResult]);
+
+  // Sound on every Round 1 answer attempt (not just conclusive ones)
+  const lastR1AnswerRef = useRef<typeof state.round1Answers[0] | null>(null);
+  useEffect(() => {
+    const answers = state.round1Answers;
+    if (answers.length === 0) return;
+    const latest = answers[answers.length - 1]!;
+    if (latest === lastR1AnswerRef.current) return;
+    lastR1AnswerRef.current = latest;
+    if (latest.correct) {
+      try { sounds?.correctPlayer?.play(); } catch (_) {}
+    } else if (!latest.skipped) {
+      try { sounds?.wrongPlayer?.play(); } catch (_) {}
+    }
+  }, [state.round1Answers]);
+
+  // Fanfare on round transition
+  useEffect(() => {
+    if (!state.transitionRound) return;
+    try { sounds?.fanfarePlayer?.play(); } catch (_) {}
+  }, [state.transitionRound]);
+
+  // Buzz click
+  const lastBuzzRef = useRef(state.buzzWinner);
+  useEffect(() => {
+    if (!state.buzzWinner || state.buzzWinner === lastBuzzRef.current) return;
+    lastBuzzRef.current = state.buzzWinner;
+    try { sounds?.clickPlayer?.play(); } catch (_) {}
+  }, [state.buzzWinner]);
+
+  // Fanfare on game over
+  useEffect(() => {
+    if (!state.gameOver) return;
+    try { sounds?.fanfarePlayer?.play(); } catch (_) {}
+  }, [state.gameOver]);
 
   // Leave if no room and no game over (user left externally)
   useEffect(() => {

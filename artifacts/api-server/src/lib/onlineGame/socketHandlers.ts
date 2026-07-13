@@ -22,21 +22,40 @@ function isDifficulty(v: unknown): v is Difficulty {
   return v === "easy" || v === "medium" || v === "hard";
 }
 
-async function fetchProfile(userId: string): Promise<{ username: string; avatar: string } | null> {
+async function fetchProfile(userId: string): Promise<{
+  username: string;
+  avatar: string;
+  level: number;
+  totalWins: number;
+} | null> {
   const db = await getDb();
   const { ObjectId } = await import("mongodb");
   const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
   if (!user) return null;
-  return { username: user["username"] as string, avatar: user["avatar"] as string };
+  return {
+    username:  user["username"]  as string,
+    avatar:    user["avatar"]    as string,
+    level:     (user["level"]     as number) ?? 1,
+    totalWins: (user["totalWins"] as number) ?? 0,
+  };
 }
 
 function broadcastRoomUpdate(io: Server, room: Room) {
   io.to(room.code).emit("room:update", { room: serializeRoom(room) });
 }
 
+function cancelDisconnectGrace(userId: string) {
+  const timer = disconnectTimers.get(userId);
+  if (timer) {
+    clearTimeout(timer);
+    disconnectTimers.delete(userId);
+  }
+}
+
 export function registerOnlineGameHandlers(io: Server, socket: Socket) {
   const userId = socket.data["userId"] as string;
 
+  // ── Room: Create ────────────────────────────────────────────────────────────
   socket.on("room:create", async (payload: { difficulty?: unknown }, ack?: (res: unknown) => void) => {
     try {
       const difficulty = isDifficulty(payload?.difficulty) ? payload.difficulty : "medium";
@@ -47,12 +66,14 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
       if (existingRoom) leaveRoom(userId);
 
       const room = createRoom({
-        mode: "group",
+        mode:         "group",
         difficulty,
-        hostUserId: userId,
+        hostUserId:   userId,
         hostUsername: profile.username,
-        hostAvatar: profile.avatar,
+        hostAvatar:   profile.avatar,
         hostSocketId: socket.id,
+        hostLevel:    profile.level,
+        hostTotalWins:profile.totalWins,
       });
       socket.join(room.code);
       ack?.({ ok: true, room: serializeRoom(room) });
@@ -61,6 +82,7 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     }
   });
 
+  // ── Room: Join ──────────────────────────────────────────────────────────────
   socket.on("room:join", async (payload: { code?: unknown }, ack?: (res: unknown) => void) => {
     try {
       const code = String(payload?.code ?? "").toUpperCase().trim();
@@ -68,7 +90,7 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
       const profile = await fetchProfile(userId);
       if (!profile) throw new RoomError("الملف الشخصي غير موجود");
 
-      const room = joinRoom(code, userId, profile.username, profile.avatar, socket.id);
+      const room = joinRoom(code, userId, profile.username, profile.avatar, socket.id, profile.level, profile.totalWins);
       socket.join(room.code);
       cancelDisconnectGrace(userId);
       broadcastRoomUpdate(io, room);
@@ -82,6 +104,7 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     }
   });
 
+  // ── Room: Leave ─────────────────────────────────────────────────────────────
   socket.on("room:leave", () => {
     const room = getRoomForUser(userId);
     dequeue(userId);
@@ -90,6 +113,7 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     if (updated) broadcastRoomUpdate(io, updated);
   });
 
+  // ── Room: Start ─────────────────────────────────────────────────────────────
   socket.on("room:start", async (_payload: unknown, ack?: (res: unknown) => void) => {
     try {
       const room = getRoomForUser(userId);
@@ -105,82 +129,149 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     }
   });
 
+  // ── Matchmaking: Join ───────────────────────────────────────────────────────
   socket.on("matchmaking:join", async (payload: { difficulty?: unknown }, ack?: (res: unknown) => void) => {
     try {
       const difficulty = isDifficulty(payload?.difficulty) ? payload.difficulty : "medium";
       const profile = await fetchProfile(userId);
       if (!profile) throw new RoomError("الملف الشخصي غير موجود");
 
-      const opponent = enqueue({ userId, username: profile.username, avatar: profile.avatar, socketId: socket.id, difficulty, queuedAt: Date.now() });
+      const existingRoom = getRoomForUser(userId);
+      if (existingRoom) leaveRoom(userId);
+
+      const opponent = enqueue({
+        userId,
+        username:  profile.username,
+        avatar:    profile.avatar,
+        socketId:  socket.id,
+        difficulty,
+        queuedAt:  Date.now(),
+        level:     profile.level,
+        totalWins: profile.totalWins,
+      });
+
       if (!opponent) {
         ack?.({ ok: true, matched: false });
         return;
       }
 
+      // Matched — create a quick room
+      const oppProfile = await fetchProfile(opponent.userId);
       const room = createRoom({
-        mode: "quick",
+        mode:          "quick",
         difficulty,
-        hostUserId: opponent.userId,
-        hostUsername: opponent.username,
-        hostAvatar: opponent.avatar,
-        hostSocketId: opponent.socketId,
+        hostUserId:    userId,
+        hostUsername:  profile.username,
+        hostAvatar:    profile.avatar,
+        hostSocketId:  socket.id,
+        hostLevel:     profile.level,
+        hostTotalWins: profile.totalWins,
       });
-      const joined = joinRoom(room.code, userId, profile.username, profile.avatar, socket.id);
+      joinRoom(
+        room.code,
+        opponent.userId,
+        opponent.username,
+        opponent.avatar,
+        opponent.socketId,
+        opponent.level ?? 1,
+        opponent.totalWins ?? 0,
+      );
+
+      // Join both sockets to the room channel
       socket.join(room.code);
-      io.sockets.sockets.get(opponent.socketId)?.join(room.code);
+      const oppSocket = io.sockets.sockets.get(opponent.socketId);
+      if (oppSocket) oppSocket.join(room.code);
 
-      io.to(room.code).emit("room:matched", { room: serializeRoom(joined) });
-      ack?.({ ok: true, matched: true, room: serializeRoom(joined) });
-
-      const db = await getDb();
-      setTimeout(() => startGame(io, db, joined).catch((err) => logger.error({ err }, "[onlineGame] quick match start failed")), 1200);
+      // Notify both players
+      io.to(room.code).emit("room:matched", { room: serializeRoom(room) });
+      ack?.({ ok: true, matched: true, room: serializeRoom(room) });
     } catch (err) {
-      ack?.({ ok: false, error: err instanceof RoomError ? err.message : "فشل البحث عن مباراة" });
+      ack?.({ ok: false, error: err instanceof RoomError ? err.message : "فشل البحث" });
     }
   });
 
-  socket.on("matchmaking:cancel", () => dequeue(userId));
-
-  socket.on("game:buzz", () => {
+  // ── Matchmaking: Cancel ─────────────────────────────────────────────────────
+  socket.on("matchmaking:cancel", () => {
+    dequeue(userId);
     const room = getRoomForUser(userId);
-    if (room) handleBuzz(io, room, userId);
+    if (room) {
+      const updated = leaveRoom(userId);
+      socket.leave(room.code);
+      if (updated) broadcastRoomUpdate(io, updated);
+    }
   });
 
+  // ── Player Ready (quick match ready system) ─────────────────────────────────
+  socket.on("player:ready", async () => {
+    const room = getRoomForUser(userId);
+    if (!room || room.status !== "lobby") return;
+
+    room.readySet.add(userId);
+    const readyUserIds = Array.from(room.readySet);
+    io.to(room.code).emit("room:readyUpdate", { readyUserIds });
+
+    // When ALL connected players are ready → 3-second countdown then auto-start
+    const connected = room.players.filter((p) => p.connected);
+    if (connected.length >= 2 && connected.every((p) => room.readySet.has(p.userId))) {
+      // Emit countdown for client-side display
+      io.to(room.code).emit("room:readyCountdown", { seconds: 3 });
+      setTimeout(async () => {
+        // Double check still in lobby
+        if (room.status !== "lobby") return;
+        try {
+          const db = await getDb();
+          await startGame(io, db, room);
+        } catch (err) {
+          logger.warn({ err }, "Auto-start after ready failed");
+        }
+      }, 3000);
+    }
+  });
+
+  // ── Game: Submit Answer ─────────────────────────────────────────────────────
   socket.on("game:submitAnswer", (payload: { text?: unknown }) => {
     const room = getRoomForUser(userId);
-    if (!room) return;
-    const text = typeof payload?.text === "string" ? payload.text : "";
+    if (!room || room.status !== "playing") return;
+    const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+    if (!text) return;
     handleSubmitAnswer(io, room, userId, text);
   });
 
-  socket.on("game:skip", () => {
+  // ── Game: Buzz ──────────────────────────────────────────────────────────────
+  socket.on("game:buzz", () => {
     const room = getRoomForUser(userId);
-    if (room) handleSkip(io, room, userId);
+    if (!room || room.status !== "playing") return;
+    handleBuzz(io, room, userId);
   });
 
+  // ── Game: Skip (Round 1) ────────────────────────────────────────────────────
+  socket.on("game:skip", () => {
+    const room = getRoomForUser(userId);
+    if (!room || room.status !== "playing") return;
+    handleSkip(io, room, userId);
+  });
+
+  // ── Game: Bid (Round 2) ─────────────────────────────────────────────────────
   socket.on("game:bid", (payload: { amount?: unknown }) => {
     const room = getRoomForUser(userId);
-    if (!room) return;
-    const amount = Number(payload?.amount);
+    if (!room || room.status !== "playing") return;
+    const amount = typeof payload?.amount === "number" ? payload.amount : 0;
     placeBid(room, io, userId, amount);
   });
 
-  // Push-to-talk voice relay: binary audio clip forwarded to everyone else in the room.
-  socket.on("voice:clip", (payload: { data?: unknown; mimeType?: unknown }) => {
+  // ── Voice relay ─────────────────────────────────────────────────────────────
+  socket.on("voice:clip", (payload: { data: unknown; mimeType: string }) => {
     const room = getRoomForUser(userId);
-    if (!room || !payload?.data) return;
-    socket.to(room.code).emit("voice:clip", {
-      fromUserId: userId,
-      data: payload.data,
-      mimeType: typeof payload.mimeType === "string" ? payload.mimeType : "audio/m4a",
-    });
+    if (!room) return;
+    io.to(room.code).emit("voice:clip", { fromUserId: userId, ...payload });
   });
 
+  // ── Disconnect ──────────────────────────────────────────────────────────────
   socket.on("disconnect", () => {
     const room = getRoomForUser(userId);
     if (!room) return;
     const player = room.players.find((p) => p.userId === userId);
-    if (!player || player.socketId !== socket.id) return; // stale/secondary connection
+    if (!player || player.socketId !== socket.id) return;
 
     dequeue(userId);
     const updated = markDisconnected(userId);
@@ -196,7 +287,6 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
           const after = leaveRoom(userId);
           if (after) broadcastRoomUpdate(io, after);
         } else {
-          // Keep them in final standings but out of remaining turn/buzz eligibility.
           p.outOfRound1 = true;
           io.to(r.code).emit("game:playerLeft", { userId, room: serializeRoom(r) });
         }
@@ -205,7 +295,7 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     disconnectTimers.set(userId, timer);
   });
 
-  // On (re)connection, silently rejoin an in-progress room if one exists for this user.
+  // ── Reconnect: silently rejoin in-progress room ──────────────────────────────
   const existingRoom = getRoomForUser(userId);
   if (existingRoom) {
     const player = existingRoom.players.find((p) => p.userId === userId);
@@ -218,13 +308,5 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
       broadcastRoomUpdate(io, existingRoom);
       socket.emit("game:state", buildStateSnapshot(existingRoom));
     }
-  }
-}
-
-function cancelDisconnectGrace(userId: string) {
-  const timer = disconnectTimers.get(userId);
-  if (timer) {
-    clearTimeout(timer);
-    disconnectTimers.delete(userId);
   }
 }

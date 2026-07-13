@@ -1,19 +1,18 @@
 /**
  * OnlineGameContext — Socket.io-backed state machine for online multiplayer.
  *
- * Creates a dedicated socket (separate from AuthContext's presence socket) so
- * the game lifecycle is independent. Connect on entering the online flow,
- * disconnect on leaving.
- *
  * Server events handled:
- *   room:update, room:matched, game:started, game:roundStart, game:question,
- *   game:answerResult, game:answerAck, game:bidUpdate, game:auctionWon,
- *   game:auctionResult, game:buzzResult, game:round4Reveal, game:questionReveal,
+ *   room:update, room:matched, room:readyUpdate, room:readyCountdown,
+ *   game:started, game:roundStart, game:question,
+ *   game:answerResult, game:round1Answer, game:answerAck,
+ *   game:bidUpdate, game:auctionWon, game:auctionResult,
+ *   game:buzzResult, game:round4Reveal, game:questionReveal,
  *   game:playerLeft, game:over, game:state, voice:clip
  *
  * Client events emitted:
  *   room:create, room:join, room:leave, room:start,
  *   matchmaking:join, matchmaking:cancel,
+ *   player:ready,
  *   game:submitAnswer, game:buzz, game:skip, game:bid, voice:clip
  */
 
@@ -28,6 +27,7 @@ import React, {
 } from 'react';
 import type { Socket } from 'socket.io-client';
 import { createSocket } from '@/lib/socket';
+import { API_BASE } from '@/lib/apiClient';
 
 // ── Public types ───────────────────────────────────────────────────────────────
 
@@ -41,6 +41,8 @@ export interface OnlinePlayer {
   connected: boolean;
   outOfRound1: boolean;
   skipUsed: boolean;
+  level: number;
+  totalWins: number;
 }
 
 export interface OnlineRoom {
@@ -50,15 +52,18 @@ export interface OnlineRoom {
   hostUserId: string;
   players: OnlinePlayer[];
   difficulty: 'easy' | 'medium' | 'hard';
+  readyUserIds: string[];
 }
 
 export interface QuestionData {
   id: string;
-  question?: string;       // Round 1, Round 3
-  choices?: string[];      // Round 3 optional choices
-  category?: string;       // Round 2 auction category
-  description?: string;    // Round 2 auction description
-  transfers?: string[];    // Round 5 / Tiebreaker player chain
+  question?: string;
+  choices?: string[];
+  category?: string;
+  description?: string;
+  transfers?: string[];
+  questionIndex?: number;
+  questionStrikes?: Record<string, number>;
 }
 
 export interface AnswerResult {
@@ -68,9 +73,20 @@ export interface AnswerResult {
   correctAnswer: string;
   submittedText: string | null;
   skipped?: boolean;
+  strikeOut?: boolean;
   strikes?: number;
   outOfRound1?: boolean;
   scores?: Record<string, number>;
+  questionStrikes?: Record<string, number>;
+}
+
+export interface Round1Answer {
+  userId: string;
+  text: string;
+  correct: boolean;
+  skipped?: boolean;
+  questionIndex: number;
+  questionStrikes: Record<string, number>;
 }
 
 export interface OnlineGameState {
@@ -81,13 +97,20 @@ export interface OnlineGameState {
   room: OnlineRoom | null;
   matchmaking: boolean;
 
+  // Ready system (quick match)
+  readyPlayers: string[];
+  readyCountdown: number | null; // null = not counting, 3/2/1 = counting
+
   // Game progression
-  currentRound: string | null;   // 'round1' | 'round2' | ... | 'tiebreaker'
-  phase: string | null;          // mirrors server phase field
-  turnUserId: string | null;     // Round 1: who has the turn
+  currentRound: string | null;
+  phase: string | null;
+  turnUserId: string | null;
   question: QuestionData | null;
   deadlineTs: number | null;
   scores: Record<string, number>;
+
+  // Round 1 — live answer feed (all answers broadcast to both players)
+  round1Answers: Round1Answer[];
 
   // Round 2 – auction
   currentBid: { userId: string; amount: number } | null;
@@ -97,7 +120,7 @@ export interface OnlineGameState {
   // Buzzer rounds
   buzzWinner: { userId: string; deadlineTs: number } | null;
 
-  // Result display (auto-clears after 2.5 s)
+  // Result display (auto-clears after 2.8 s)
   lastResult: AnswerResult | null;
 
   // Round 4 reveal
@@ -127,12 +150,15 @@ const INITIAL_STATE: OnlineGameState = {
   error: null,
   room: null,
   matchmaking: false,
+  readyPlayers: [],
+  readyCountdown: null,
   currentRound: null,
   phase: null,
   turnUserId: null,
   question: null,
   deadlineTs: null,
   scores: {},
+  round1Answers: [],
   currentBid: null,
   biddingDeadline: null,
   auctionWonBy: null,
@@ -151,58 +177,70 @@ const INITIAL_STATE: OnlineGameState = {
 interface OnlineGameContextValue {
   state: OnlineGameState;
   myUserId: string | null;
+  myToken: string | null;
 
-  // Lifecycle
   connect: (token: string, userId: string) => void;
   disconnect: () => void;
 
-  // Room management
   createRoom: (difficulty: string) => Promise<{ ok: boolean; error?: string }>;
   joinRoom: (code: string) => Promise<{ ok: boolean; error?: string }>;
   leaveRoom: () => void;
   startGame: () => Promise<{ ok: boolean; error?: string }>;
 
-  // Matchmaking
   joinMatchmaking: (difficulty: string) => Promise<{ ok: boolean; error?: string }>;
   cancelMatchmaking: () => void;
 
-  // Game actions
+  sendReady: () => void;
+
   submitAnswer: (text: string) => void;
   buzz: () => void;
   skip: () => void;
   placeBid: (amount: number) => void;
 
-  // Voice
   sendVoiceClip: (data: unknown, mimeType: string) => void;
 
-  // UI helpers
   clearResult: () => void;
   clearRevealedAnswer: () => void;
   clearVoiceClip: () => void;
 }
 
-// ── Context ────────────────────────────────────────────────────────────────────
-
 const OnlineGameContext = createContext<OnlineGameContextValue | null>(null);
 
 export function OnlineGameProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<OnlineGameState>(INITIAL_STATE);
-  const socketRef = useRef<Socket | null>(null);
-  const myUserIdRef = useRef<string | null>(null);
-  const [myUserId, setMyUserId] = useState<string | null>(null);
-  const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [state, setState]   = useState<OnlineGameState>(INITIAL_STATE);
+  const socketRef           = useRef<Socket | null>(null);
+  const myUserIdRef         = useRef<string | null>(null);
+  const myTokenRef          = useRef<string | null>(null);
+  const [myUserId, setMyUserId]   = useState<string | null>(null);
+  const [myToken,  setMyToken]    = useState<string | null>(null);
+  const resultTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Socket event handlers ────────────────────────────────────────────────────
+  // ── Countdown helper (client-side 3-2-1) ───────────────────────────────────
+  const startReadyCountdown = useCallback((from: number) => {
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    setState((s) => ({ ...s, readyCountdown: from }));
+    let remaining = from;
+    countdownTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+        setState((s) => ({ ...s, readyCountdown: null }));
+      } else {
+        setState((s) => ({ ...s, readyCountdown: remaining }));
+      }
+    }, 1000);
+  }, []);
+
+  // ── Socket event handlers ─────────────────────────────────────────────────
 
   const attachHandlers = useCallback((socket: Socket) => {
     socket.on('connect', () => {
       setState((s) => ({ ...s, connected: true, error: null }));
     });
-
     socket.on('disconnect', () => {
       setState((s) => ({ ...s, connected: false }));
     });
-
     socket.on('connect_error', (err: Error) => {
       setState((s) => ({ ...s, connected: false, error: err.message }));
     });
@@ -218,13 +256,24 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         ...s,
         room: payload.room,
         matchmaking: false,
+        readyPlayers: [],
+        readyCountdown: null,
         error: null,
       }));
+    });
+
+    socket.on('room:readyUpdate', (payload: { readyUserIds: string[] }) => {
+      setState((s) => ({ ...s, readyPlayers: payload.readyUserIds }));
+    });
+
+    socket.on('room:readyCountdown', (payload: { seconds: number }) => {
+      startReadyCountdown(payload.seconds);
     });
 
     // ── Game lifecycle ───────────────────────────────────────────────────────
 
     socket.on('game:started', (payload: { room: OnlineRoom }) => {
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
       setState((s) => ({
         ...s,
         room: payload.room,
@@ -236,6 +285,9 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         lastResult: null,
         gameOver: null,
         transitionRound: null,
+        round1Answers: [],
+        readyPlayers: [],
+        readyCountdown: null,
       }));
     });
 
@@ -257,6 +309,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         round4CorrectAnswer: null,
         revealedAnswer: null,
         turnUserId: null,
+        round1Answers: [],
       }));
     });
 
@@ -267,24 +320,48 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       question: QuestionData;
       deadlineTs: number;
       scores: Record<string, number>;
+      questionIndex?: number;
+      questionStrikes?: Record<string, number>;
     }) => {
+      setState((s) => {
+        // If same question (same id), keep answer feed; otherwise reset
+        const sameQuestion = s.question?.id === payload.question.id;
+        return {
+          ...s,
+          currentRound: payload.round,
+          transitionRound: null,
+          phase: payload.phase,
+          turnUserId: payload.turnUserId ?? null,
+          question: {
+            ...payload.question,
+            questionIndex: payload.questionIndex,
+            questionStrikes: payload.questionStrikes,
+          },
+          deadlineTs: payload.deadlineTs,
+          scores: payload.scores,
+          lastResult: null,
+          buzzWinner: null,
+          auctionWonBy: null,
+          currentBid: null,
+          biddingDeadline: null,
+          revealedAnswer: null,
+          round4Results: null,
+          round4CorrectAnswer: null,
+          // Reset answer feed only on a truly new question
+          round1Answers: sameQuestion ? s.round1Answers : [],
+        };
+      });
+    });
+
+    // ── Round 1: answer feed (broadcast every attempt to both players) ────────
+    socket.on('game:round1Answer', (payload: Round1Answer) => {
       setState((s) => ({
         ...s,
-        currentRound: payload.round,
-        transitionRound: null,        // clear transition when first question arrives
-        phase: payload.phase,
-        turnUserId: payload.turnUserId ?? null,
-        question: payload.question,
-        deadlineTs: payload.deadlineTs,
-        scores: payload.scores,
-        lastResult: null,
-        buzzWinner: null,
-        auctionWonBy: null,
-        currentBid: null,
-        biddingDeadline: null,
-        revealedAnswer: null,
-        round4Results: null,
-        round4CorrectAnswer: null,
+        round1Answers: [...s.round1Answers, payload],
+        // Update question's questionStrikes if server sent updated map
+        question: s.question
+          ? { ...s.question, questionStrikes: payload.questionStrikes }
+          : s.question,
       }));
     });
 
@@ -294,6 +371,18 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         ...s,
         lastResult: payload,
         scores: payload.scores ?? s.scores,
+        // Update room players' strikes from payload
+        room: s.room
+          ? {
+              ...s.room,
+              players: s.room.players.map((p) => {
+                if (payload.questionStrikes && p.userId in payload.questionStrikes) {
+                  return { ...p };
+                }
+                return p;
+              }),
+            }
+          : s.room,
       }));
       resultTimerRef.current = setTimeout(() => {
         setState((s) => ({ ...s, lastResult: null }));
@@ -301,7 +390,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('game:answerAck', () => {
-      // Server acknowledged our Round 4 answer — handled implicitly by UI disabling the input
+      // Server acknowledged our Round 4 answer
     });
 
     // ── Round 2 – Auction ────────────────────────────────────────────────────
@@ -323,8 +412,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       }));
     });
 
-    socket.on('game:auctionResult', (payload: { winnerUserId: null; amount: number }) => {
-      // No one bid — topic skipped
+    socket.on('game:auctionResult', (_payload: { winnerUserId: null; amount: number }) => {
       setState((s) => ({ ...s, auctionWonBy: null }));
     });
 
@@ -361,7 +449,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       }));
     });
 
-    // ── Correct answer reveal (buzzer / auction no-bid) ──────────────────────
+    // ── Correct answer reveal ────────────────────────────────────────────────
 
     socket.on('game:questionReveal', (payload: { round: string; correctAnswer: string }) => {
       setState((s) => ({ ...s, revealedAnswer: payload.correctAnswer }));
@@ -400,6 +488,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       buzzLock: { userId: string } | null;
       auctionWinnerUserId: string | null;
       currentBid: { userId: string; amount: number } | null;
+      questionStrikes?: Record<string, number>;
     }) => {
       setState((s) => ({
         ...s,
@@ -414,9 +503,9 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     socket.on('voice:clip', (payload: { fromUserId: string; data: unknown; mimeType: string }) => {
       setState((s) => ({ ...s, lastVoiceClip: payload }));
     });
-  }, []);
+  }, [startReadyCountdown]);
 
-  // ── Lifecycle actions ──────────────────────────────────────────────────────
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   const connect = useCallback((token: string, userId: string) => {
     socketRef.current?.disconnect();
@@ -424,15 +513,20 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     attachHandlers(socket);
     socketRef.current = socket;
     myUserIdRef.current = userId;
+    myTokenRef.current = token;
     setMyUserId(userId);
+    setMyToken(token);
   }, [attachHandlers]);
 
   const disconnect = useCallback(() => {
     if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     socketRef.current?.disconnect();
     socketRef.current = null;
     myUserIdRef.current = null;
+    myTokenRef.current = null;
     setMyUserId(null);
+    setMyToken(null);
     setState(INITIAL_STATE);
   }, []);
 
@@ -440,6 +534,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     return () => {
       socketRef.current?.disconnect();
       if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     };
   }, []);
 
@@ -452,9 +547,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         return;
       }
       socketRef.current.emit('room:create', { difficulty }, (res: { ok: boolean; room?: OnlineRoom; error?: string }) => {
-        if (res.ok && res.room) {
-          setState((s) => ({ ...s, room: res.room!, error: null }));
-        }
+        if (res.ok && res.room) setState((s) => ({ ...s, room: res.room!, error: null }));
         resolve(res);
       });
     });
@@ -467,9 +560,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         return;
       }
       socketRef.current.emit('room:join', { code: code.toUpperCase().trim() }, (res: { ok: boolean; room?: OnlineRoom; error?: string }) => {
-        if (res.ok && res.room) {
-          setState((s) => ({ ...s, room: res.room!, error: null }));
-        }
+        if (res.ok && res.room) setState((s) => ({ ...s, room: res.room!, error: null }));
         resolve(res);
       });
     });
@@ -477,7 +568,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
 
   const leaveRoom = useCallback(() => {
     socketRef.current?.emit('room:leave');
-    setState((s) => ({ ...s, room: null, matchmaking: false }));
+    setState((s) => ({ ...s, room: null, matchmaking: false, readyPlayers: [], readyCountdown: null }));
   }, []);
 
   const startGame = useCallback((): Promise<{ ok: boolean; error?: string }> => {
@@ -505,9 +596,8 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         if (!res.ok) {
           setState((s) => ({ ...s, matchmaking: false }));
         } else if (res.matched && res.room) {
-          setState((s) => ({ ...s, room: res.room!, matchmaking: false }));
+          setState((s) => ({ ...s, room: res.room!, matchmaking: false, readyPlayers: [] }));
         }
-        // If not matched, matchmaking:true stays — waiting for room:matched event
         resolve(res);
       });
     });
@@ -516,6 +606,20 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
   const cancelMatchmaking = useCallback(() => {
     socketRef.current?.emit('matchmaking:cancel');
     setState((s) => ({ ...s, matchmaking: false }));
+  }, []);
+
+  // ── Ready system ───────────────────────────────────────────────────────────
+
+  const sendReady = useCallback(() => {
+    socketRef.current?.emit('player:ready');
+    // Optimistically mark self as ready in local state
+    const uid = myUserIdRef.current;
+    if (uid) {
+      setState((s) => ({
+        ...s,
+        readyPlayers: s.readyPlayers.includes(uid) ? s.readyPlayers : [...s.readyPlayers, uid],
+      }));
+    }
   }, []);
 
   // ── Game actions ───────────────────────────────────────────────────────────
@@ -559,6 +663,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     <OnlineGameContext.Provider value={{
       state,
       myUserId,
+      myToken,
       connect,
       disconnect,
       createRoom,
@@ -567,6 +672,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       startGame,
       joinMatchmaking,
       cancelMatchmaking,
+      sendReady,
       submitAnswer,
       buzz,
       skip,

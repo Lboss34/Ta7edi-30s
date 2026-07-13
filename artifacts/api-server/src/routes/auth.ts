@@ -24,6 +24,9 @@ function toPublicUser(doc: WithId<Document> | Document) {
     username: doc["username"] as string,
     avatar: doc["avatar"] as string,
     createdAt: doc["createdAt"] as Date,
+    level: (doc["level"] as number) ?? 1,
+    xp: (doc["xp"] as number) ?? 0,
+    totalWins: (doc["totalWins"] as number) ?? 0,
   };
 }
 
@@ -70,6 +73,9 @@ router.post("/auth/register", async (req, res) => {
       uniqueId,
       avatar: chosenAvatar,
       friends: [],
+      level: 1,
+      xp: 0,
+      totalWins: 0,
       createdAt: now,
     });
 

@@ -1,56 +1,38 @@
 ---
 name: Online Multiplayer UI Architecture
-description: Complete screen list, navigation flow, and key wiring decisions for the real-time online multiplayer feature.
+description: 3 screens (lobby/waiting/game); myUserId is separate context value; phase-based single-screen game renderer; ready system added for quick match
 ---
 
-# Online Multiplayer UI — Architecture Notes
+# Online Multiplayer UI
 
-## Navigation flow
-```
-index.tsx (🌐 أونلاين button)
-  → /online-lobby       connect socket + create/join/quick-match
-  → /online-waiting     room code display, player list, host start button
-  → /online-game        single screen drives all 5 rounds via phase-based rendering
-```
+## Screens
+- `online-lobby.tsx` — entry point: create room / join by code (6-char code) / quick match.
+- `online-waiting.tsx` — 3 visual states:
+  1. Matchmaking spinner (state.matchmaking && !room)
+  2. **MatchFoundScreen** — quick mode, room in lobby (NEW Task 3: Ready system)
+  3. Normal group waiting room — group mode, room in lobby
+- `online-game.tsx` — all rounds rendered in one screen via phase-based conditionals.
 
-## Provider tree (app/_layout.tsx)
-```
-AuthProvider
-  GameProvider
-    MultiplayerProvider
-      OnlineGameProvider        ← added here, inside auth so token is accessible
-        SoundProvider
-          RootLayoutNav
-```
+## Ready System (quick match)
+- `room:matched` event → `MatchFoundScreen` shown (both players' avatars, names, level, wins).
+- Each player clicks "جاهز" → emits `player:ready` → server tracks in `room.readySet`.
+- Server emits `room:readyUpdate` → client updates `readyPlayers[]`.
+- When ALL connected players ready → server emits `room:readyCountdown { seconds: 3 }` → auto-starts after 3s.
+- Context: `sendReady()`, `readyPlayers: string[]`, `readyCountdown: number | null`.
 
-## OnlineGameContext exports
-- `state: OnlineGameState` — full reactive state (room, phase, scores, question, etc.)
-- `myUserId: string | null` — NOT inside state object; comes as separate context value
-- Lifecycle: `connect(token, userId)`, `disconnect()`
-- Room: `createRoom(difficulty)`, `joinRoom(code)`, `leaveRoom()`, `startGame()`
-- Matchmaking: `joinMatchmaking(difficulty)`, `cancelMatchmaking()`
-- Game actions: `submitAnswer(text)`, `buzz()`, `skip()`, `placeBid(amount)`
-- Voice: `sendVoiceClip(data, mimeType)`, `clearVoiceClip()`
-- UI helpers: `clearResult()`, `clearRevealedAnswer()`
+## Context shape
+- `myUserId` is a SEPARATE top-level value in the context (not inside state).
+- Room code is always 6 characters (validation `code.length < 6` in lobby).
+- `OnlinePlayer` now includes `level: number` and `totalWins: number`.
 
-## online-game.tsx phase rendering map
-| state.currentRound | state.phase | Component |
-|---|---|---|
-| round1 | round1_turn / round1_waiting | Round1UI |
-| round2 | round2_bidding / round2_answer | Round2UI |
-| round3 | round3_buzz / round3_answer | BuzzerUI (accentColor=#FF6B00) |
-| round4 | round4_question / round4_reveal | Round4UI |
-| round5 | round5_buzz / round5_answer | BuzzerUI (accentColor=#00E5FF) |
-| tiebreaker | tiebreaker_buzz / tiebreaker_answer | BuzzerUI (accentColor=#FFD700) |
-| any | transitionRound ≠ null | RoundTransition (full-screen) |
-| — | — | game_over → GameOverUI |
+## Sound effects (Task 5)
+- In `OnlineGameScreen`, `useSoundContext()` wired to:
+  - `lastResult` change → correct→correctPlayer, wrong→wrongPlayer
+  - `round1Answers` latest item → same correct/wrong logic
+  - `transitionRound` change → fanfarePlayer
+  - `buzzWinner` change → clickPlayer
+  - `gameOver` → fanfarePlayer
 
-## Key wiring decisions
-- **gestureEnabled: false** on online-game screen (prevent swipe-back mid-game)
-- `myUserId` accessed from context directly, NOT via `state.myUserId` (causes TS errors)
-- `state.scores` is a `Record<string, number>` indexed by userId — not per-player
-- Countdowns are client-driven from `deadlineTs` timestamps (server-authoritative)
-- Auto-navigate: waiting → game on `room.status === 'playing'`; game exits to lobby if `!state.room && !state.gameOver`
-- Voice PTT shows visual speaker indicator; actual audio encoding is a future enhancement
+**Why:** spec required sounds on socket events, not on local actions.
 
-**Why:** These decisions prevent the most common real-time game UI bugs (stale state, wrong navigation, TypeScript confusion between myUserId scoping).
+**How to apply:** Sound context must be provided in the tree above `OnlineGameScreen` (it is, via _layout.tsx wrapping with SoundProvider).

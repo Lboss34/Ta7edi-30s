@@ -1,25 +1,32 @@
 ---
-name: Round 1 Strike System V3.0
-description: Round 1 rewritten as PingPong multi-answer mechanic; key data and state machine decisions
+name: V3.0 Round 1 Strike System
+description: Round 1 completely rewritten; per-question strikes, 3 Qs, answer feed broadcast to both players
 ---
 
-# Round 1 Strike System
+# Round 1 — Per-Question Turn-Based (V3.0)
 
-## Data type
-`PingPongQuestion { id, difficulty, question, validAnswers: string[] }` in `data/questions.ts`.
-GameState uses `pingPongQuestions: PingPongQuestion[]` (3 picked per game) — the old `questionSet: Round1Set` field is GONE.
+## Rule
+- Exactly **3 questions** (`ROUND1_QUESTIONS = 3`).
+- Players take turns on the **SAME question** (alternating on wrong answers).
+- Each player has **3 strikes PER QUESTION** (`ROUND1_STRIKES_MAX = 3`), reset each question.
+- Correct answer → that player wins the point, next question.
+- 3 strikes for one player → opponent wins the point automatically.
+- Every answer attempt (right/wrong/skip/timeout) is broadcast to BOTH players via `game:round1Answer`.
 
-**Why:** V3.0 spec changed Round 1 from per-player single-answer to shared ping-pong multi-answer.
+## Key server state (Room)
+- `room.questionStrikes: Record<userId, number>` — resets each question in `askRound1Question`.
+- `room.turnIndex` tracks whose turn it is within `room.turnOrder`.
+- `findNextR1TurnIdx(room, fromIndex)` returns the next eligible player (< 3 strikes on this question).
 
-## State machine (round1.tsx)
-- Phases: `intro | playing | question_result`
-- Per-question state: `strikes [0,0]`, `passUsed [false,false]`, `currentTurn 0|1`, `givenAnswers string[]`
-- All state resets via `resetQuestionState()` between questions
-- Turn always toggles after every action (correct/wrong/pass)
-- 3 strikes → opponent wins point → `question_result` phase
-- All answers exhausted → draw (no point)
+## Client state (OnlineGameState)
+- `round1Answers: Round1Answer[]` — accumulated live feed for current question; cleared on new question.
+- `state.question.questionStrikes: Record<string, number>` — sent with every `game:question` and `game:round1Answer`.
 
-**How to apply:** Any future change to Round 1 must keep strikes/pass isolated per question via resetQuestionState().
+## Events
+- `game:question` — same event reused when turn changes (same question ID → input NOT reset, turnUserId changes).
+- `game:round1Answer` — broadcast on every attempt; client appends to `round1Answers`.
+- `game:answerResult` — only emitted when question is CONCLUDED (point awarded).
 
-## Round 5 RTL fix
-Transfer array is reversed before display: `[...puzzle.transfers].reverse()`. Club names store country tags inline: `'ريال مدريد (الإسباني)'`. ClubBadge component uses Wikimedia SVG URLs with `onError` fallback to neon letter circle.
+**Why:** Per spec — players must see each other's answers live; old "one answer per turn per question" replaced.
+
+**How to apply:** Do NOT reuse the old global `strikes` field for Round 1 display; use `question.questionStrikes` map instead.

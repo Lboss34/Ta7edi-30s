@@ -1,4 +1,3 @@
-import type { Db } from "mongodb";
 import type { Difficulty, OnlinePlayer, Room, RoomQuestions } from "./types";
 
 const rooms = new Map<string, Room>();
@@ -30,7 +29,15 @@ export function getRoomForUser(userId: string): Room | undefined {
   return code ? rooms.get(code) : undefined;
 }
 
-function makePlayer(userId: string, username: string, avatar: string, socketId: string, isHost: boolean): OnlinePlayer {
+function makePlayer(
+  userId: string,
+  username: string,
+  avatar: string,
+  socketId: string,
+  isHost: boolean,
+  level = 1,
+  totalWins = 0,
+): OnlinePlayer {
   return {
     userId,
     username,
@@ -43,6 +50,9 @@ function makePlayer(userId: string, username: string, avatar: string, socketId: 
     outOfRound1: false,
     disconnectedAt: null,
     isHost,
+    level,
+    totalWins,
+    questionStrikes: 0,
   };
 }
 
@@ -53,6 +63,8 @@ export function createRoom(params: {
   hostUsername: string;
   hostAvatar: string;
   hostSocketId: string;
+  hostLevel?: number;
+  hostTotalWins?: number;
 }): Room {
   const code = createRoomCode();
   const room: Room = {
@@ -60,7 +72,17 @@ export function createRoom(params: {
     mode: params.mode,
     difficulty: params.difficulty,
     status: "lobby",
-    players: [makePlayer(params.hostUserId, params.hostUsername, params.hostAvatar, params.hostSocketId, true)],
+    players: [
+      makePlayer(
+        params.hostUserId,
+        params.hostUsername,
+        params.hostAvatar,
+        params.hostSocketId,
+        true,
+        params.hostLevel ?? 1,
+        params.hostTotalWins ?? 0,
+      ),
+    ],
     questions: null,
     currentRound: null,
     phase: "lobby",
@@ -68,6 +90,7 @@ export function createRoom(params: {
     maxQuestionsThisRound: 0,
     turnOrder: [],
     turnIndex: 0,
+    questionStrikes: {},
     currentBid: null,
     biddingDeadline: null,
     auctionWinnerUserId: null,
@@ -79,6 +102,7 @@ export function createRoom(params: {
     tiebreakerPool: [],
     tiebreakerIndex: 0,
     tiebreakerCandidates: [],
+    readySet: new Set(),
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
   };
@@ -89,7 +113,15 @@ export function createRoom(params: {
 
 export class RoomError extends Error {}
 
-export function joinRoom(code: string, userId: string, username: string, avatar: string, socketId: string): Room {
+export function joinRoom(
+  code: string,
+  userId: string,
+  username: string,
+  avatar: string,
+  socketId: string,
+  level = 1,
+  totalWins = 0,
+): Room {
   const room = rooms.get(code);
   if (!room) throw new RoomError("الغرفة غير موجودة");
   if (room.status === "finished") throw new RoomError("انتهت هذه الجولة");
@@ -102,7 +134,7 @@ export function joinRoom(code: string, userId: string, username: string, avatar:
   } else {
     if (room.status !== "lobby") throw new RoomError("اللعبة قيد التشغيل بالفعل");
     if (room.players.length >= 8) throw new RoomError("الغرفة ممتلئة");
-    room.players.push(makePlayer(userId, username, avatar, socketId, false));
+    room.players.push(makePlayer(userId, username, avatar, socketId, false, level, totalWins));
   }
   userRoom.set(userId, code);
   room.lastActivityAt = Date.now();
@@ -117,6 +149,7 @@ export function leaveRoom(userId: string): Room | undefined {
   if (!room) return undefined;
 
   room.players = room.players.filter((p) => p.userId !== userId);
+  room.readySet.delete(userId);
   room.lastActivityAt = Date.now();
 
   if (room.players.length === 0) {
@@ -155,6 +188,7 @@ export function serializeRoom(room: Room) {
     mode: room.mode,
     difficulty: room.difficulty,
     status: room.status,
+    hostUserId: room.players.find((p) => p.isHost)?.userId ?? null,
     players: room.players.map((p) => ({
       userId: p.userId,
       username: p.username,
@@ -164,9 +198,12 @@ export function serializeRoom(room: Room) {
       strikes: p.strikes,
       outOfRound1: p.outOfRound1,
       isHost: p.isHost,
+      level: p.level,
+      totalWins: p.totalWins,
     })),
     currentRound: room.currentRound,
     phase: room.phase,
+    readyUserIds: Array.from(room.readySet),
   };
 }
 

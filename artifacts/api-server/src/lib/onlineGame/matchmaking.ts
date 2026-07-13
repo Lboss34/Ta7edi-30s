@@ -7,6 +7,8 @@ interface QueueEntry {
   socketId: string;
   difficulty: Difficulty;
   queuedAt: number;
+  level: number;
+  totalWins: number;
 }
 
 const queue: QueueEntry[] = [];

@@ -1,0 +1,31 @@
+Hi Agent. The foundational Online Multiplayer UI and Matchmaking are looking great! However, we need to implement crucial refinements, fix specific game logic, and introduce a Leveling System. Please implement the following 5 tasks carefully without breaking the existing flow:
+
+### 1. Room Creation & Join Fixes:
+- **Host Start Button:** In the Waiting Room Lobby, the host should NOT have to wait for the lobby to be fully maxed out. As soon as there are at least 2 players in the room, change the waiting text to a clickable "Start Game" button so the host can start immediately.
+- **Room Code Fix:** In the "Join by Room Code" UI, update the placeholder/text validation to accept a 6-character code (currently it incorrectly says 4-digit code).
+
+### 2. Leveling & Stats System (Database & UI):
+- Add `level`, `xp`, and `totalWins` to the User schema in MongoDB.
+- **XP Logic:** Implement a progressive/exponential leveling curve (e.g., PUBG style). For example: `NextLevelXP = BaseXP * (CurrentLevel ^ 1.5)`. Give XP for playing, and more XP/Wins for winning a match.
+- Display the player's Level and Total Wins on their Profile and next to their name in the Lobbies.
+
+### 3. Quick Matchmaking "Ready" Screen:
+- Do NOT jump straight into the game when a match is found.
+- When an opponent is found, show a "Match Found!" screen displaying both players' Avatars, Names, Levels, and Total Wins.
+- Add a "READY" button for both players.
+- Once both players click "READY", trigger a 3-second visual countdown (3.. 2.. 1..) on the screen, and THEN transition to the actual game screen.
+
+### 4. Overhaul "What Do You Know?" Stage (Stage 1):
+- The current logic (1 question = 1 answer per player) is WRONG. 
+- **Correct Logic:** A single question has an ARRAY of correct answers.
+- Players take turns answering the SAME question. 
+- **Visibility:** EVERY typed answer (whether right or wrong) MUST be broadcasted and displayed on the UI for both players to see.
+- **Strike System:** Each player has a limit of 3 Strikes (wrong answers or timeouts) PER QUESTION.
+- If Player A hits 3 Strikes, Player B automatically wins the point for that question.
+- Move to the next question. There should be exactly 3 questions for this stage.
+
+### 5. Fix Online Sound Effects:
+- The offline game has sound effects (Correct, Wrong, Buzzer, Tick). These are currently missing in the Online mode.
+- Bind the existing Expo Audio sound effects to the Socket.io events. For example, when the socket broadcasts `answer_result: correct`, trigger the success sound locally for all players in the room.
+
+Please execute these 5 tasks step-by-step. Let me know when you finish so I can test the new Matchmaking Ready flow and Stage 1 logic!
