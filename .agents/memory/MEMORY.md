@@ -3,3 +3,4 @@
 - [expo-audio migration](expo-audio-migration.md) — expo-av removed (deprecated in SDK 54); use expo-audio with useAudioPlayer hook
 - [RN 0.81 AbortController breaks unrelated screens](rn081-abortcontroller-event-collision.md) — `new AbortController()` can poison global Event class ("read-only property NONE") and crash unrelated screens; use Promise.race timeouts instead
 - [Accounts/Friends Phase 1 architecture](accounts-friends-phase1.md) — Mongo-backed custom auth (HMAC-hashed bearer tokens), 6-digit uniqueId, Socket.io mounted at /api/socket.io for the artifact proxy
+- [Online Multiplayer UI Architecture](online-multiplayer-ui.md) — 3 screens (lobby/waiting/game); myUserId is separate context value not inside state; phase-based single-screen game renderer

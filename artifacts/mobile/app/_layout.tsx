@@ -16,6 +16,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { GameProvider } from '@/contexts/GameContext';
 import { MultiplayerProvider } from '@/contexts/MultiplayerContext';
+import { OnlineGameProvider } from '@/contexts/OnlineGameContext';
 import { SoundProvider } from '@/contexts/SoundContext';
 import { warmAbortControllerPolyfill } from '@/lib/safeAbortPolyfill';
 
@@ -61,9 +62,11 @@ export default function RootLayout() {
               <AuthProvider>
                 <GameProvider>
                   <MultiplayerProvider>
-                    <SoundProvider>
-                      <RootLayoutNav />
-                    </SoundProvider>
+                    <OnlineGameProvider>
+                      <SoundProvider>
+                        <RootLayoutNav />
+                      </SoundProvider>
+                    </OnlineGameProvider>
                   </MultiplayerProvider>
                 </GameProvider>
               </AuthProvider>

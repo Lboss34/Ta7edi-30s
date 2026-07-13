@@ -195,6 +195,33 @@ export default function HomeScreen() {
                   <Ionicons name="arrow-back" size={20} color="rgba(0,0,0,0.5)" />
                 </LinearGradient>
               </TouchableOpacity>
+
+              {/* Online mode */}
+              <TouchableOpacity
+                onPress={() => {
+                  playClick();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                  router.push('/online-lobby');
+                }}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['#00C853', '#009624']}
+                  style={S.modeCard}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                >
+                  <View style={S.modeIconRow}>
+                    <Ionicons name="wifi" size={36} color="#FFF" />
+                  </View>
+                  <View style={S.modeTexts}>
+                    <Text style={S.modeTitle}>🌐 أونلاين</Text>
+                    <Text style={S.modeSub}>تحدّ لاعبين من كل مكان — ٥ جولات حقيقية!</Text>
+                  </View>
+                  <View style={[S.newBadge, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
+                    <Text style={S.newBadgeTxt}>جديد</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
 
             {/* Rounds preview */}
@@ -542,6 +569,8 @@ const S = StyleSheet.create({
   mpPlayersSummary: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   mpPlayerChip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1.5, paddingVertical: 8, paddingHorizontal: 12 },
   mpPlayerName: { fontSize: 14, fontFamily: 'Inter_700Bold' },
+  newBadge: { borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8 },
+  newBadgeTxt: { fontSize: 10, fontFamily: 'Inter_700Bold', color: '#FFF', letterSpacing: 1 },
   btnRow: { flexDirection: 'row', gap: 12 },
   backBtn: {
     height: 58, borderRadius: 18, borderWidth: 1.5,

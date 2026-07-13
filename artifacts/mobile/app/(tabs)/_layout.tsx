@@ -23,6 +23,9 @@ export default function GameLayout() {
       <Stack.Screen name="auth-login" />
       <Stack.Screen name="auth-register" />
       <Stack.Screen name="friends" />
+      <Stack.Screen name="online-lobby" />
+      <Stack.Screen name="online-waiting" />
+      <Stack.Screen name="online-game" options={{ gestureEnabled: false }} />
     </Stack>
   );
 }
