@@ -259,11 +259,54 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     placeBid(room, io, userId, amount);
   });
 
-  // ── Voice relay ─────────────────────────────────────────────────────────────
+  // ── Voice relay (legacy audio clips) ────────────────────────────────────────
   socket.on("voice:clip", (payload: { data: unknown; mimeType: string }) => {
     const room = getRoomForUser(userId);
     if (!room) return;
     io.to(room.code).emit("voice:clip", { fromUserId: userId, ...payload });
+  });
+
+  // ── WebRTC signaling relay ────────────────────────────────────────────────
+  // Relay offer/answer/ICE-candidate to a specific peer by userId.
+  // The `to` field is a userId; we look up their current socketId from the room.
+
+  function relayToPeer(
+    event: string,
+    payload: { to?: unknown; [k: string]: unknown },
+    extra: Record<string, unknown> = {},
+  ) {
+    const room = getRoomForUser(userId);
+    if (!room) return;
+    const targetId = typeof payload.to === "string" ? payload.to : null;
+    if (!targetId) return;
+    const target = room.players.find((p) => p.userId === targetId);
+    if (!target?.socketId) return;
+    io.to(target.socketId).emit(event, { from: userId, ...payload, ...extra });
+  }
+
+  socket.on("voice:offer", (payload: { to?: unknown; offer?: unknown }) => {
+    relayToPeer("voice:offer", payload);
+  });
+
+  socket.on("voice:answer", (payload: { to?: unknown; answer?: unknown }) => {
+    relayToPeer("voice:answer", payload);
+  });
+
+  socket.on(
+    "voice:ice-candidate",
+    (payload: { to?: unknown; candidate?: unknown }) => {
+      relayToPeer("voice:ice-candidate", payload);
+    },
+  );
+
+  // Mute state: broadcast to the whole room (not just one peer)
+  socket.on("voice:mute", (payload: { muted?: unknown }) => {
+    const room = getRoomForUser(userId);
+    if (!room) return;
+    io.to(room.code).emit("voice:mute", {
+      fromUserId: userId,
+      muted: !!payload?.muted,
+    });
   });
 
   // ── Disconnect ──────────────────────────────────────────────────────────────

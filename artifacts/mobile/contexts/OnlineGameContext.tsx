@@ -198,6 +198,10 @@ interface OnlineGameContextValue {
   placeBid: (amount: number) => void;
 
   sendVoiceClip: (data: unknown, mimeType: string) => void;
+  /** Emit a raw signaling message via the shared socket (used by VoiceContext) */
+  emitVoiceSignal: (event: string, payload: unknown) => void;
+  /** Register a one-time listener on the shared socket (used by VoiceContext) */
+  getSocket: () => import('socket.io-client').Socket | null;
 
   clearResult: () => void;
   clearRevealedAnswer: () => void;
@@ -644,6 +648,12 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     socketRef.current?.emit('voice:clip', { data, mimeType });
   }, []);
 
+  const emitVoiceSignal = useCallback((event: string, payload: unknown) => {
+    socketRef.current?.emit(event, payload);
+  }, []);
+
+  const getSocket = useCallback(() => socketRef.current, []);
+
   // ── UI helpers ─────────────────────────────────────────────────────────────
 
   const clearResult = useCallback(() => {
@@ -678,6 +688,8 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       skip,
       placeBid,
       sendVoiceClip,
+      emitVoiceSignal,
+      getSocket,
       clearResult,
       clearRevealedAnswer,
       clearVoiceClip,

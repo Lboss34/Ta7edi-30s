@@ -26,6 +26,7 @@ import { useColors } from '@/hooks/useColors';
 import { useOnlineGame, type OnlinePlayer } from '@/contexts/OnlineGameContext';
 import { addLeaderboardEntry } from '@/lib/leaderboard';
 import { useSoundContext } from '@/contexts/SoundContext';
+import { useVoice } from '@/contexts/VoiceContext';
 
 const { width: W } = Dimensions.get('window');
 const PLAYER_COLORS = ['#7B2FFF', '#FFD700', '#00E5FF', '#FF6B00', '#00C853'];
@@ -1115,13 +1116,37 @@ const VP = StyleSheet.create({
 
 // ── Root Screen ────────────────────────────────────────────────────────────────
 
+// ── Mic button (reusable) ────────────────────────────────────────────────────
+
+function MicButton({ size = 36 }: { size?: number }) {
+  const voice = useVoice();
+  if (!voice?.isAvailable) return null;
+  const { isActive, isMuted, toggleMute } = voice;
+  const color = !isActive ? '#FFFFFF33' : isMuted ? '#FF3B3B' : '#00C853';
+  return (
+    <TouchableOpacity
+      onPress={toggleMute}
+      activeOpacity={0.75}
+      style={{
+        width: size, height: size, borderRadius: size / 2,
+        backgroundColor: `${color}18`,
+        borderWidth: 1.5, borderColor: color,
+        alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <Ionicons name={(isMuted ? 'mic-off' : 'mic') as any} size={size * 0.45} color={color} />
+    </TouchableOpacity>
+  );
+}
+
 export default function OnlineGameScreen() {
-  const { state, myUserId, leaveRoom, disconnect } = useOnlineGame();
+  const { state, myUserId, getSocket, leaveRoom, disconnect } = useOnlineGame();
   const router  = useRouter();
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const topPad  = Platform.OS === 'web' ? 67 : insets.top;
   const sounds  = useSoundContext();
+  const voice   = useVoice();
 
   // ── Task 5: Sound effects tied to socket events ──────────────────────────
   // Correct / wrong on every answer result (round1Answer & answerResult)
@@ -1172,6 +1197,22 @@ export default function OnlineGameScreen() {
     try { sounds?.fanfarePlayer?.play(); } catch (_) {}
   }, [state.gameOver]);
 
+  // ── Voice: connect to room peers (voice was started in waiting room) ─────
+  useEffect(() => {
+    if (!state.room || !myUserId || !voice?.isAvailable) return;
+    const socket = getSocket();
+    if (!socket) return;
+    // If voice wasn't started yet (e.g. player entered directly), start it now
+    voice.startVoice().then(ok => {
+      if (!ok) return;
+      const peerIds = state.room!.players
+        .filter(p => p.userId !== myUserId && p.connected)
+        .map(p => p.userId);
+      voice.connectToPeers(socket, myUserId, peerIds);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.room?.players.length, myUserId]);
+
   // Leave if no room and no game over (user left externally)
   useEffect(() => {
     if (!state.room && !state.gameOver) {
@@ -1181,6 +1222,7 @@ export default function OnlineGameScreen() {
 
   const handleLeave = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    voice?.stopVoice();
     leaveRoom();
     disconnect();
     router.replace('/');
