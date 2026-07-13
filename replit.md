@@ -15,7 +15,7 @@ A mobile trivia/competition game built with Expo (React Native), featuring 5 gam
 - Required env: `DATABASE_URL` — Postgres connection string (used by `lib/db` Drizzle setup)
 - Required env: `PORT` — port for API server (injected automatically by Replit; required, no default fallback in code)
 - Required env: `MONGODB_URI` — MongoDB connection string; questions are served from MongoDB collections (`round1_questions`, etc.); if unset, questions API is disabled and the mobile app falls back to local data
-  - Currently set, but authentication is failing ("bad auth") — the API server logs a warning and falls back to local question data. Update the secret with valid Atlas credentials to enable the MongoDB-backed questions API.
+  - Connected and healthy — `MongoDB already fully seeded` confirmed on startup.
 
 ## Stack
 
