@@ -5,3 +5,4 @@
 - [Accounts/Friends Phase 1 architecture](accounts-friends-phase1.md) — Mongo-backed custom auth (HMAC-hashed bearer tokens), 6-digit uniqueId, Socket.io mounted at /api/socket.io for the artifact proxy
 - [Online Multiplayer UI Architecture](online-multiplayer-ui.md) — 3 screens (lobby/waiting/game); myUserId is separate context value not inside state; phase-based single-screen game renderer
 - [Voice Chat Architecture](voice-chat.md) — WebRTC P2P via react-native-webrtc; deployed to server; UI ready; needs `eas build` to activate native module
+- [MongoDB SRV DNS in sandbox](mongodb-srv-dns.md) — dev sandbox default DNS resolver ESERVFAILs on SRV records; mongodb+srv:// needs dns.setServers([8.8.8.8]) before connecting

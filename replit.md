@@ -15,7 +15,7 @@ A mobile trivia/competition game built with Expo (React Native), featuring 5 gam
 - Required env: `DATABASE_URL` — Postgres connection string (used by `lib/db` Drizzle setup)
 - Required env: `PORT` — port for API server (injected automatically by Replit; required, no default fallback in code)
 - Required env: `MONGODB_URI` — MongoDB connection string; questions are served from MongoDB collections (`round1_questions`, etc.); if unset, questions API is disabled and the mobile app falls back to local data
-  - Connected and healthy — `MongoDB already fully seeded` confirmed on startup.
+  - Connected and healthy — seeded counts confirmed via `GET /api/questions/status`.
 
 ## Stack
 
@@ -47,6 +47,8 @@ _Describe the high-level user-facing capabilities of this app once they exist._
 ## Gotchas
 
 - **Build libs before typechecking api-server**: `lib/api-zod` and `lib/db` use TypeScript project references (`composite: true`). Run `pnpm --filter @workspace/api-zod exec tsc -p tsconfig.json && pnpm --filter @workspace/db exec tsc -p tsconfig.json` before running `pnpm --filter @workspace/api-server run typecheck`, otherwise you'll get "Output file has not been built from source file" errors.
+- **MongoDB `mongodb+srv://` DNS lookups fail in this dev sandbox**: the default resolver returns `ESERVFAIL` for SRV records. Fixed in `artifacts/api-server/src/lib/mongodb.ts` by pointing Node's DNS resolver at `8.8.8.8`/`1.1.1.1` before connecting.
+- **Mobile `apiClient.ts` (`artifacts/mobile/lib/apiClient.ts`)** intentionally hardcodes the published `.replit.app` deployment URL, not the `.replit.dev` dev-preview domain — update it if/when a new deployment URL is issued.
 
 ## Pointers
 

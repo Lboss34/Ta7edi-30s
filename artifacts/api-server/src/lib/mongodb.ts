@@ -1,4 +1,11 @@
+import dns from "node:dns";
 import { MongoClient, type Db } from "mongodb";
+
+// The sandboxed dev environment's default DNS resolver returns ESERVFAIL for
+// SRV lookups (used by mongodb+srv:// URIs). Point Node's resolver at a
+// public DNS server that supports SRV records so Atlas connection strings
+// resolve correctly.
+dns.setServers(["8.8.8.8", "1.1.1.1", ...dns.getServers()]);
 
 const uri = process.env["MONGODB_URI"];
 
