@@ -2,14 +2,17 @@
  * Online Game Screen — renders the full real-time online game driven by Socket.io.
  * Phase-based rendering: one screen handles all rounds and transitions.
  *
+ * Rounds: round1 → round2 → round3 → round5 → (tiebreaker if tied).
+ * Round 4 ("30-second challenge") only exists offline; not present here.
+ *
  * Phases handled:
  *   round1_turn / round1_waiting
  *   round2_bidding / round2_answer
- *   round3_buzz / round3_answer  (generic buzzer)
- *   round4_question / round4_reveal
- *   round5_buzz / round5_answer  (transfer puzzle)
- *   tiebreaker_buzz / tiebreaker_answer
+ *   round3_buzz / round3_answer          (generic buzzer)
+ *   round5_buzz / round5_answer          (transfer puzzle, buzz-lock)
+ *   tiebreaker_buzz / tiebreaker_answer  (transfer puzzle, buzz-lock + skip)
  *   transitionRound (between rounds)
+ *   roundEnd (synced round-summary popup)
  *   game_over
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -97,7 +100,6 @@ function ScoreHeader({ round }: { round: string | null }) {
     round1: { label: 'ماذا تعرف', color: '#7B2FFF' },
     round2: { label: 'المزاد',    color: '#FFD700' },
     round3: { label: 'الجرس',     color: '#FF6B00' },
-    round4: { label: 'تحدي ٣٠',   color: '#FF3B3B' },
     round5: { label: 'خمّن اللاعب', color: '#00E5FF' },
     tiebreaker: { label: 'الهدف الذهبي', color: '#FFD700' },
   };
@@ -198,9 +200,8 @@ const ROUND_META: Record<string, { title: string; sub: string; color: string; ic
   round1: { title: 'ماذا تعرف؟',   sub: 'بالتناوب — 3 أسئلة، 3 ضربات لكل سؤال', color: '#7B2FFF', icon: 'help-circle'   },
   round2: { title: 'المزاد',        sub: 'زايد واربح الموضوع!',            color: '#FFD700', icon: 'cash'          },
   round3: { title: 'الجرس',         sub: 'اضغط أول وأجب!',                 color: '#FF6B00', icon: 'radio-button-on' },
-  round4: { title: 'تحدي الثلاثين', sub: 'الجميع يجيب في آنٍ واحد',        color: '#FF3B3B', icon: 'flash'         },
-  round5: { title: 'خمّن اللاعب',   sub: 'من هو اللاعب؟ اضغط واكشف!',     color: '#00E5FF', icon: 'people'        },
-  tiebreaker: { title: 'الهدف الذهبي', sub: 'سؤال واحد يحسم الفائز!',     color: '#FFD700', icon: 'star'          },
+  round5: { title: 'خمّن اللاعب',   sub: 'اضغط الجرس أول ثم اكشف اللاعب!', color: '#00E5FF', icon: 'people'        },
+  tiebreaker: { title: 'الهدف الذهبي', sub: 'اضغط الجرس أول ثم احسم الفوز!', color: '#FFD700', icon: 'star'          },
 };
 
 function RoundTransition({ round }: { round: string }) {
@@ -863,27 +864,48 @@ const BZ = StyleSheet.create({
   watchTxt: { fontSize: 15, fontFamily: 'Inter_700Bold' },
 });
 
-// ── Race round (Round 5 / Tiebreaker) ─────────────────────────────────────────
+// ── Puzzle buzzer round (Round 5 / Tiebreaker) ────────────────────────────────
 //
-// Offline parity: no buzzer. Any eligible player can submit a guess at any
-// time during the window; every guess is validated instantly and broadcast
-// via the generic game:answerResult event (shown by <ResultOverlay/>). Wrong
-// guesses don't eliminate — the text input stays open the whole window.
+// Same buzz-lock mechanic as Round 3: buzz → exclusive answer window → wrong
+// answer excludes only that player → first correct answer wins. Tiebreaker
+// additionally allows skipping the current puzzle (only pre-buzz), which
+// draws a different one from the pool and never causes a stall/draw.
 
-function RaceUI({ accentColor }: { accentColor: string }) {
-  const { state, submitAnswer } = useOnlineGame();
+function PuzzleBuzzerUI({ round, accentColor }: { round: 'round5' | 'tiebreaker'; accentColor: string }) {
+  const { state, myUserId, buzz: doBuzz, submitAnswer, skipPuzzle } = useOnlineGame();
   const colors = useColors();
-  const [text, setText] = useState('');
-  const secs = useCountdown(state.deadlineTs);
-  const maxSecs = state.currentRound === 'tiebreaker' ? 30 : 25;
+  const [text, setText]           = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [hasBuzzed, setHasBuzzed] = useState(false);
 
-  useEffect(() => { setText(''); }, [state.question?.id]);
+  const isBuzzPhase   = state.phase === `${round}_buzz`;
+  const isAnswerPhase = state.phase === `${round}_answer`;
+  const amWinner      = state.buzzWinner?.userId === myUserId;
+  const secs          = useCountdown(isBuzzPhase ? state.deadlineTs : (state.buzzWinner?.deadlineTs ?? null));
+  const maxSecs       = isBuzzPhase ? (round === 'tiebreaker' ? 30 : 25) : 12;
+
+  const winnerColor = state.buzzWinner ? playerColor(state.room, state.buzzWinner.userId) : accentColor;
+  const winnerName  = state.buzzWinner ? playerName(state.room, state.buzzWinner.userId) : '';
+
+  useEffect(() => { setText(''); setSubmitted(false); setHasBuzzed(false); }, [state.question?.id]);
+
+  const handleBuzz = () => {
+    if (hasBuzzed) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    doBuzz();
+    setHasBuzzed(true);
+  };
+
+  const handleSkip = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    skipPuzzle();
+  };
 
   const handleSubmit = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || !amWinner || submitted) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     submitAnswer(text.trim());
-    setText('');
+    setSubmitted(true);
   };
 
   const transfers = state.question?.transfers ?? [];
@@ -908,140 +930,138 @@ function RaceUI({ accentColor }: { accentColor: string }) {
           </View>
         </View>
 
-        <View style={BZ.timerRow}>
-          <Text style={[BZ.timerLabel, { color: colors.mutedForeground }]}>الجميع يستطيع الإجابة الآن</Text>
-          <CountdownRing secs={secs} maxSecs={maxSecs} color={accentColor} />
-        </View>
+        {/* Someone skipped this puzzle */}
+        {state.puzzleSkippedBy && (
+          <View style={[BZ.winnerBanner, { borderColor: '#FF6B00', backgroundColor: '#FF6B0018' }]}>
+            <Ionicons name="play-skip-forward" size={16} color="#FF6B00" />
+            <Text style={[BZ.winnerTxt, { color: '#FF6B00' }]}>
+              {state.puzzleSkippedBy === myUserId ? 'تخطيت هذا اللغز' : `${playerName(state.room, state.puzzleSkippedBy)} تخطّى هذا اللغز`}
+            </Text>
+          </View>
+        )}
 
-        <View style={{ gap: 10 }}>
-          <TextInput
-            style={[BZ.input, { color: colors.foreground, borderColor: accentColor, backgroundColor: `${accentColor}08` }]}
-            placeholder="اكتب اسم اللاعب..."
-            placeholderTextColor={`${accentColor}55`}
-            value={text}
-            onChangeText={setText}
-            onSubmitEditing={handleSubmit}
-            returnKeyType="send"
-            textAlign="right"
-          />
-          <TouchableOpacity onPress={handleSubmit} activeOpacity={0.85} disabled={!text.trim()}>
-            <LinearGradient
-              colors={text.trim() ? [accentColor, `${accentColor}BB`] : ['#333', '#222']}
-              style={BZ.sendBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-              <Ionicons name="send" size={18} color="#FFF" />
-              <Text style={BZ.sendBtnTxt}>إرسال</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
-}
-
-// ── Round 4: Rapid Fire ────────────────────────────────────────────────────────
-
-function Round4UI() {
-  const { state, myUserId, submitAnswer } = useOnlineGame();
-  const colors = useColors();
-  const [text, setText]           = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const secs = useCountdown(state.phase === 'round4_question' ? state.deadlineTs : null);
-
-  useEffect(() => { setText(''); setSubmitted(false); }, [state.question?.id]);
-
-  const handleSubmit = () => {
-    if (!text.trim() || submitted) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    submitAnswer(text.trim());
-    setSubmitted(true);
-  };
-
-  if (state.phase === 'round4_reveal') {
-    return (
-      <ScrollView contentContainerStyle={RF.content}>
-        <View style={[RF.revealCard, { backgroundColor: colors.card, borderColor: '#FF3B3B' }]}>
-          <Text style={RF.revealLabel}>الإجابة الصحيحة</Text>
-          <Text style={[RF.revealAnswer, { color: '#FF3B3B' }]}>{state.round4CorrectAnswer}</Text>
-        </View>
-        {(state.round4Results ?? []).map((r) => {
-          const pc  = playerColor(state.room, r.userId);
-          const pn  = playerName(state.room, r.userId);
-          const isMe = r.userId === myUserId;
-          return (
-            <View key={r.userId} style={[RF.resultRow, { borderColor: r.correct ? '#00C853' : `${pc}44`, backgroundColor: r.correct ? 'rgba(0,200,83,0.06)' : 'transparent' }]}>
-              <Ionicons name={r.correct ? 'checkmark-circle' : 'close-circle'} size={20} color={r.correct ? '#00C853' : '#FF3B3B'} />
-              <Text style={[RF.resultName, { color: pc }]}>{pn}{isMe ? ' (أنت)' : ''}</Text>
-              <Text style={[RF.resultText, { color: colors.mutedForeground }]}>{r.text || '—'}</Text>
-              {r.correct && <Text style={RF.resultPts}>+{r.points}</Text>}
+        {/* Buzz phase */}
+        {isBuzzPhase && (
+          <>
+            <View style={BZ.timerRow}>
+              <Text style={[BZ.timerLabel, { color: colors.mutedForeground }]}>وقت الجرس</Text>
+              <CountdownRing secs={secs} maxSecs={maxSecs} color={accentColor} />
             </View>
-          );
-        })}
-      </ScrollView>
-    );
-  }
-
-  return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={RF.content} keyboardShouldPersistTaps="handled">
-        <View style={[RF.topRow, { justifyContent: 'space-between' }]}>
-          <Text style={[RF.topLabel, { color: colors.mutedForeground }]}>الجميع يجيب في آنٍ واحد</Text>
-          <CountdownRing secs={secs} maxSecs={10} color="#FF3B3B" />
-        </View>
-        <View style={[RF.qCard, { backgroundColor: colors.card, borderColor: '#FF3B3B' }]}>
-          <Text style={[RF.qLabel, { color: '#FF3B3B' }]}>السؤال</Text>
-          <Text style={[RF.qTxt, { color: colors.foreground }]}>{state.question?.question ?? '...'}</Text>
-        </View>
-        {!submitted ? (
-          <View style={{ gap: 10 }}>
-            <TextInput
-              style={[RF.input, { color: colors.foreground, borderColor: '#FF3B3B', backgroundColor: 'rgba(255,59,59,0.06)' }]}
-              placeholder="اكتب إجابتك..."
-              placeholderTextColor="rgba(255,59,59,0.4)"
-              value={text}
-              onChangeText={setText}
-              onSubmitEditing={handleSubmit}
-              returnKeyType="send"
-              autoFocus
-              textAlign="right"
-            />
-            <TouchableOpacity onPress={handleSubmit} activeOpacity={0.85} disabled={!text.trim()}>
+            <TouchableOpacity onPress={handleBuzz} activeOpacity={0.7} disabled={hasBuzzed}>
               <LinearGradient
-                colors={text.trim() ? ['#FF3B3B', '#CC1010'] : ['#333', '#222']}
-                style={RF.sendBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                <Ionicons name="flash" size={18} color="#FFF" />
-                <Text style={RF.sendBtnTxt}>إرسال</Text>
+                colors={hasBuzzed ? ['#333', '#222'] : [accentColor, `${accentColor}BB`]}
+                style={[BZ.buzzBtn, { opacity: hasBuzzed ? 0.5 : 1 }]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                <Ionicons name="radio-button-on" size={52} color={hasBuzzed ? '#555' : '#FFF'} />
+                <Text style={[BZ.buzzBtnTxt, { color: hasBuzzed ? '#555' : '#FFF' }]}>
+                  {hasBuzzed ? 'جارٍ الانتظار...' : 'اضغط!'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={[RF.sentBanner, { borderColor: '#00C85344', backgroundColor: 'rgba(0,200,83,0.08)' }]}>
-            <Ionicons name="checkmark-circle" size={20} color="#00C853" />
-            <Text style={[RF.sentTxt, { color: '#00C853' }]}>تم الإرسال! في انتظار الآخرين...</Text>
-          </View>
+            {round === 'tiebreaker' && !hasBuzzed && (
+              <TouchableOpacity onPress={handleSkip} activeOpacity={0.8}>
+                <View style={[R1.skipBtn, { borderColor: '#FF6B0066' }]}>
+                  <Ionicons name="shuffle" size={16} color="#FF6B00" />
+                  <Text style={R1.skipBtnTxt}>تخطي هذا اللغز</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+
+        {/* Answer phase */}
+        {isAnswerPhase && (
+          <>
+            <View style={[BZ.winnerBanner, { borderColor: winnerColor, backgroundColor: `${winnerColor}14` }]}>
+              <Ionicons name="mic" size={18} color={winnerColor} />
+              <Text style={[BZ.winnerTxt, { color: winnerColor }]}>
+                {amWinner ? '⚡ أنت ضغطت أول — اكتب اسم اللاعب!' : `${winnerName} ضغط أول...`}
+              </Text>
+              <CountdownRing secs={secs} maxSecs={12} color={winnerColor} />
+            </View>
+
+            {amWinner && !submitted && (
+              <View style={{ gap: 10 }}>
+                <TextInput
+                  style={[BZ.input, { color: colors.foreground, borderColor: winnerColor, backgroundColor: `${winnerColor}08` }]}
+                  placeholder="اكتب اسم اللاعب..."
+                  placeholderTextColor={`${winnerColor}55`}
+                  value={text}
+                  onChangeText={setText}
+                  onSubmitEditing={handleSubmit}
+                  returnKeyType="send"
+                  autoFocus
+                  textAlign="right"
+                />
+                <TouchableOpacity onPress={handleSubmit} activeOpacity={0.85} disabled={!text.trim()}>
+                  <LinearGradient
+                    colors={text.trim() ? [accentColor, `${accentColor}BB`] : ['#333', '#222']}
+                    style={BZ.sendBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                    <Ionicons name="send" size={18} color="#FFF" />
+                    <Text style={BZ.sendBtnTxt}>إرسال</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            )}
+            {amWinner && submitted && (
+              <View style={[BZ.waitBanner, { borderColor: `${winnerColor}44` }]}>
+                <ActivityIndicator color={winnerColor} size="small" />
+                <Text style={[BZ.waitTxt, { color: winnerColor }]}>جارٍ التصحيح...</Text>
+              </View>
+            )}
+            {!amWinner && (
+              <View style={[BZ.watchBanner, { borderColor: `${winnerColor}44`, backgroundColor: `${winnerColor}08` }]}>
+                <Ionicons name="eye" size={18} color={winnerColor} />
+                <Text style={[BZ.watchTxt, { color: winnerColor }]}>{winnerName} يكتب...</Text>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
-const RF = StyleSheet.create({
-  content: { padding: 16, gap: 14 },
-  topRow: { flexDirection: 'row', alignItems: 'center' },
-  topLabel: { fontSize: 14, fontFamily: 'Inter_500Medium' },
-  qCard: { borderRadius: 20, borderWidth: 1.5, padding: 20, gap: 8, alignItems: 'flex-end' },
-  qLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.5 },
-  qTxt: { fontSize: 22, fontFamily: 'Inter_600SemiBold', textAlign: 'right', lineHeight: 34 },
-  input: { borderWidth: 1.5, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, fontSize: 18, fontFamily: 'Inter_600SemiBold', textAlign: 'right' },
-  sendBtn: { paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  sendBtnTxt: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#FFF' },
-  sentBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, borderWidth: 1.5, paddingVertical: 16 },
-  sentTxt: { fontSize: 15, fontFamily: 'Inter_700Bold' },
-  revealCard: { borderRadius: 20, borderWidth: 1.5, padding: 20, gap: 8, alignItems: 'center' },
-  revealLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', letterSpacing: 1.5, color: '#999' },
-  revealAnswer: { fontSize: 28, fontFamily: 'Inter_700Bold', textAlign: 'center' },
-  resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, borderWidth: 1, paddingVertical: 12, paddingHorizontal: 16 },
-  resultName: { fontSize: 14, fontFamily: 'Inter_700Bold' },
-  resultText: { flex: 1, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'right' },
-  resultPts: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#00C853' },
+
+// ── Round-end summary (synced popup shown to all players) ─────────────────────
+
+function RoundEndOverlay() {
+  const { state } = useOnlineGame();
+  const colors = useColors();
+  const re = state.roundEnd;
+  if (!re) return null;
+  const meta = ROUND_META[re.round] ?? { title: re.round, color: '#7B2FFF' };
+
+  const sorted = (state.room?.players ?? [])
+    .map(p => ({ ...p, score: re.scores[p.userId] ?? 0 }))
+    .sort((a, b) => b.score - a.score);
+
+  return (
+    <View style={RE.overlay} pointerEvents="auto">
+      <View style={[RE.card, { backgroundColor: colors.card, borderColor: meta.color }]}>
+        <Ionicons name="checkmark-done-circle" size={40} color={meta.color} />
+        <Text style={[RE.title, { color: meta.color }]}>انتهت جولة {meta.title}</Text>
+        <View style={{ width: '100%', gap: 8, marginTop: 4 }}>
+          {sorted.map((p, i) => (
+            <View key={p.userId} style={[RE.row, { borderColor: `${meta.color}44` }]}>
+              <Text style={RE.rowAvatar}>{p.avatar || '🎮'}</Text>
+              <Text style={[RE.rowName, { color: colors.foreground }]}>{p.username}</Text>
+              <Text style={[RE.rowScore, { color: i === 0 ? meta.color : colors.mutedForeground }]}>{p.score}</Text>
+            </View>
+          ))}
+        </View>
+        <ActivityIndicator color={meta.color} style={{ marginTop: 10 }} />
+      </View>
+    </View>
+  );
+}
+const RE = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(5,5,16,0.92)', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24 },
+  card: { width: '100%', maxWidth: 380, borderRadius: 22, borderWidth: 1.5, padding: 24, gap: 10, alignItems: 'center' },
+  title: { fontSize: 20, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, borderWidth: 1, paddingVertical: 8, paddingHorizontal: 12, width: '100%' },
+  rowAvatar: { fontSize: 18 },
+  rowName: { flex: 1, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  rowScore: { fontSize: 18, fontFamily: 'Inter_700Bold' },
 });
 
 // ── Game Over ──────────────────────────────────────────────────────────────────

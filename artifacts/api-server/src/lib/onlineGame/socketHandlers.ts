@@ -12,7 +12,7 @@ import {
   RoomError,
 } from "./rooms";
 import { enqueue, dequeue } from "./matchmaking";
-import { startGame, handleSubmitAnswer, handleBuzz, handleSkip, placeBid, handleWithdraw, buildStateSnapshot } from "./engine";
+import { startGame, handleSubmitAnswer, handleBuzz, handleSkip, handleSkipPuzzle, placeBid, handleWithdraw, buildStateSnapshot } from "./engine";
 import type { Difficulty, Room } from "./types";
 
 const DISCONNECT_GRACE_MS = 60_000;
@@ -264,6 +264,13 @@ export function registerOnlineGameHandlers(io: Server, socket: Socket) {
     const room = getRoomForUser(userId);
     if (!room || room.status !== "playing") return;
     handleWithdraw(io, room, userId);
+  });
+
+  // ── Game: Skip puzzle (Tiebreaker — before anyone buzzes, never a draw) ────
+  socket.on("game:skipPuzzle", () => {
+    const room = getRoomForUser(userId);
+    if (!room || room.status !== "playing") return;
+    handleSkipPuzzle(io, room, userId);
   });
 
   // ── Disconnect ──────────────────────────────────────────────────────────────

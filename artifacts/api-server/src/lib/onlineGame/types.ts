@@ -20,12 +20,6 @@ export interface BuzzerQuestion {
   choices?: string[];
   answer: string;
 }
-export interface RapidQuestion {
-  id: string;
-  difficulty: Difficulty;
-  question: string;
-  answer: string;
-}
 export interface TransferPuzzle {
   id: string;
   difficulty: Difficulty;
@@ -37,12 +31,11 @@ export interface RoomQuestions {
   round1: PingPongQuestion[];
   round2: AuctionTopic[];
   round3: BuzzerQuestion[];
-  round4: RapidQuestion[];
   round5: TransferPuzzle[];
   tiebreaker: TransferPuzzle[];
 }
 
-export type RoundKey = "round1" | "round2" | "round3" | "round4" | "round5" | "tiebreaker";
+export type RoundKey = "round1" | "round2" | "round3" | "round5" | "tiebreaker";
 
 export type GamePhase =
   | "lobby"
@@ -52,10 +45,10 @@ export type GamePhase =
   | "round2_answer"
   | "round3_buzz"
   | "round3_answer"
-  | "round4_question"
-  | "round4_reveal"
-  | "round5_guess"
-  | "tiebreaker_guess"
+  | "round5_buzz"
+  | "round5_answer"
+  | "tiebreaker_buzz"
+  | "tiebreaker_answer"
   | "round_end"
   | "game_over";
 
@@ -82,13 +75,6 @@ export interface BuzzLock {
   userId: string;
   lockedAt: number;
   answerDeadline: number;
-}
-
-export interface SimultaneousAnswer {
-  userId: string;
-  text: string;
-  correct: boolean;
-  submittedAt: number;
 }
 
 export interface Room {
@@ -123,18 +109,15 @@ export interface Room {
   buzzLock: BuzzLock | null;
   excludedFromBuzz: Set<string>;
 
-  // round5/tiebreaker (simultaneous "race" — no buzz lock, mirrors offline)
-  raceResolved: boolean;
-
-  // round4 (simultaneous rapid fire)
-  simultaneousAnswers: Map<string, SimultaneousAnswer>;
-
   questionDeadline: number | null;
   activeTimer: NodeJS.Timeout | null;
 
   tiebreakerPool: TransferPuzzle[];
   tiebreakerIndex: number;
   tiebreakerCandidates: string[];
+  // Puzzle ids already shown/skipped this tiebreaker — used so "skip" always
+  // draws a different puzzle and cycles back once the pool is exhausted.
+  tiebreakerSkipped: Set<string>;
 
   // Ready system (quick match)
   readySet: Set<string>;

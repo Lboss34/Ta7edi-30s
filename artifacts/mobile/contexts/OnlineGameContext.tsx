@@ -1,20 +1,23 @@
 /**
  * OnlineGameContext — Socket.io-backed state machine for online multiplayer.
  *
+ * Rounds: round1 → round2 → round3 → round5 → (tiebreaker if tied). Round 4
+ * ("30-second challenge") only exists offline; it's skipped entirely online.
+ *
  * Server events handled:
  *   room:update, room:matched, room:readyUpdate, room:readyCountdown,
- *   game:started, game:roundStart, game:question,
+ *   game:started, game:roundStart, game:roundEnd, game:question,
  *   game:answerResult, game:round1Answer, game:answerAck,
  *   game:bidUpdate, game:auctionWon, game:auctionResult, game:withdraw,
  *   game:round2Start, game:round2Answer, game:round2Result,
- *   game:buzzResult, game:round4Reveal, game:questionReveal,
- *   game:playerLeft, game:over, game:state
+ *   game:buzzResult, game:questionReveal, game:puzzleSkipped,
+ *   game:playerLeft, game:over, game:xpAwarded, game:state
  *
  * Client events emitted:
  *   room:create, room:join, room:leave, room:start,
  *   matchmaking:join, matchmaking:cancel,
  *   player:ready,
- *   game:submitAnswer, game:buzz, game:skip, game:bid, game:withdraw
+ *   game:submitAnswer, game:buzz, game:skip, game:skipPuzzle, game:bid, game:withdraw
  */
 
 import React, {
@@ -143,18 +146,21 @@ export interface OnlineGameState {
   round2Result: Round2Result | null;
   withdrawInfo: { withdrawnBy: string; winnerUserId: string; amount: number } | null;
 
-  // Buzzer round (Round 3 only)
+  // Buzzer round (Round 3, Round 5, Tiebreaker — same buzz-lock mechanic)
   buzzWinner: { userId: string; deadlineTs: number } | null;
+
+  // Tiebreaker: someone skipped the current puzzle before anyone buzzed
+  puzzleSkippedBy: string | null;
 
   // Result display (auto-clears after 2.8 s)
   lastResult: AnswerResult | null;
 
-  // Round 4 reveal
-  round4Results: { userId: string; text: string; correct: boolean; points: number }[] | null;
-  round4CorrectAnswer: string | null;
-
   // Between-round animation
   transitionRound: string | null;
+
+  // Synchronized round-summary popup — shown to all players right after a
+  // round ends, before the next round's transition banner arrives.
+  roundEnd: { round: string; scores: Record<string, number> } | null;
 
   // Correct answer reveal (buzzer / auction no-winner)
   revealedAnswer: string | null;
@@ -166,6 +172,10 @@ export interface OnlineGameState {
     tied: string[];
     decidedByTiebreaker?: boolean;
   } | null;
+
+  // XP earned this match — only ever populated on the winner's client
+  // (server emits game:xpAwarded solely to the winning player's socket).
+  xpAwarded: { level: number; xp: number; totalWins: number; xpGain: number; leveledUp: boolean } | null;
 }
 
 const INITIAL_STATE: OnlineGameState = {
@@ -189,12 +199,13 @@ const INITIAL_STATE: OnlineGameState = {
   round2Result: null,
   withdrawInfo: null,
   buzzWinner: null,
+  puzzleSkippedBy: null,
   lastResult: null,
-  round4Results: null,
-  round4CorrectAnswer: null,
   transitionRound: null,
+  roundEnd: null,
   revealedAnswer: null,
   gameOver: null,
+  xpAwarded: null,
 };
 
 // ── Context interface ──────────────────────────────────────────────────────────
@@ -220,6 +231,7 @@ interface OnlineGameContextValue {
   submitAnswer: (text: string) => void;
   buzz: () => void;
   skip: () => void;
+  skipPuzzle: () => void;
   placeBid: (amount: number) => void;
   withdraw: () => void;
 
@@ -239,6 +251,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
   const resultTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const withdrawTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const puzzleSkipTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Countdown helper (client-side 3-2-1) ───────────────────────────────────
   const startReadyCountdown = useCallback((from: number) => {
@@ -309,6 +322,9 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         lastResult: null,
         gameOver: null,
         transitionRound: null,
+        roundEnd: null,
+        xpAwarded: null,
+        puzzleSkippedBy: null,
         round1Answers: [],
         readyPlayers: [],
         readyCountdown: null,
@@ -321,6 +337,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         ...s,
         currentRound: payload.round,
         transitionRound: payload.round,
+        roundEnd: null,
         scores: payload.scores,
         question: null,
         deadlineTs: null,
@@ -332,12 +349,17 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         round2Result: null,
         withdrawInfo: null,
         buzzWinner: null,
-        round4Results: null,
-        round4CorrectAnswer: null,
+        puzzleSkippedBy: null,
         revealedAnswer: null,
         turnUserId: null,
         round1Answers: [],
       }));
+    });
+
+    // Synced "round complete" summary — server holds every client here for a
+    // fixed delay (via the roundEnd popup) before the next round begins.
+    socket.on('game:roundEnd', (payload: { round: string; scores: Record<string, number> }) => {
+      setState((s) => ({ ...s, roundEnd: payload, scores: payload.scores, question: null, buzzWinner: null }));
     });
 
     socket.on('game:question', (payload: {
@@ -357,6 +379,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
           ...s,
           currentRound: payload.round,
           transitionRound: null,
+          roundEnd: null,
           phase: payload.phase,
           turnUserId: payload.turnUserId ?? null,
           question: {
@@ -372,8 +395,6 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
           currentBid: null,
           biddingDeadline: null,
           revealedAnswer: null,
-          round4Results: null,
-          round4CorrectAnswer: null,
           round2Result: null,
           // Reset answer feeds only on a truly new question
           round1Answers: sameQuestion ? s.round1Answers : [],
@@ -483,32 +504,28 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       }, 3000);
     });
 
-    // ── Buzzer round (Round 3 only) ──────────────────────────────────────────
+    // ── Buzzer round (Round 3, Round 5, Tiebreaker — shared buzz-lock) ────────
 
     socket.on('game:buzzResult', (payload: { winnerUserId: string; deadlineTs: number }) => {
       setState((s) => ({
         ...s,
-        phase: 'round3_answer',
+        phase: s.currentRound ? `${s.currentRound}_answer` : s.phase,
         buzzWinner: { userId: payload.winnerUserId, deadlineTs: payload.deadlineTs },
         deadlineTs: payload.deadlineTs,
       }));
     });
 
-    // ── Round 4 – Rapid Fire reveal ──────────────────────────────────────────
-
-    socket.on('game:round4Reveal', (payload: {
-      correctAnswer: string;
-      results: { userId: string; text: string; correct: boolean; points: number }[];
-      scores: Record<string, number>;
-    }) => {
-      if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
-      setState((s) => ({
-        ...s,
-        phase: 'round4_reveal',
-        round4Results: payload.results,
-        round4CorrectAnswer: payload.correctAnswer,
-        scores: payload.scores,
-      }));
+    // Tiebreaker: someone skipped before anyone buzzed — a fresh
+    // game:question for the new puzzle follows immediately after this.
+    // Auto-clear on a short timer (like withdrawInfo) since the very next
+    // game:question event fires in the same tick and would otherwise wipe
+    // this before it's ever rendered.
+    socket.on('game:puzzleSkipped', (payload: { skippedBy: string }) => {
+      if (puzzleSkipTimerRef.current) clearTimeout(puzzleSkipTimerRef.current);
+      setState((s) => ({ ...s, puzzleSkippedBy: payload.skippedBy }));
+      puzzleSkipTimerRef.current = setTimeout(() => {
+        setState((s) => ({ ...s, puzzleSkippedBy: null }));
+      }, 2200);
     });
 
     // ── Correct answer reveal ────────────────────────────────────────────────
@@ -538,8 +555,17 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         gameOver: payload,
         scores: payload.scores,
         transitionRound: null,
+        roundEnd: null,
         lastResult: null,
       }));
+    });
+
+    // XP earned this match — the server only ever sends this to the winner's
+    // own socket, so simply receiving it means "you won". Arrives shortly
+    // after game:over once the DB write finishes; keep it independent of
+    // gameOver's payload so ordering doesn't matter.
+    socket.on('game:xpAwarded', (payload: { level: number; xp: number; totalWins: number; xpGain: number; leveledUp: boolean }) => {
+      setState((s) => ({ ...s, xpAwarded: payload }));
     });
 
     // ── Reconnect state restore ──────────────────────────────────────────────
@@ -578,6 +604,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     if (withdrawTimerRef.current) clearTimeout(withdrawTimerRef.current);
+    if (puzzleSkipTimerRef.current) clearTimeout(puzzleSkipTimerRef.current);
     socketRef.current?.disconnect();
     socketRef.current = null;
     myUserIdRef.current = null;
@@ -592,6 +619,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       socketRef.current?.disconnect();
       if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (puzzleSkipTimerRef.current) clearTimeout(puzzleSkipTimerRef.current);
       if (withdrawTimerRef.current) clearTimeout(withdrawTimerRef.current);
     };
   }, []);
@@ -694,6 +722,10 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     socketRef.current?.emit('game:skip');
   }, []);
 
+  const skipPuzzle = useCallback(() => {
+    socketRef.current?.emit('game:skipPuzzle');
+  }, []);
+
   const placeBid = useCallback((amount: number) => {
     socketRef.current?.emit('game:bid', { amount });
   }, []);
@@ -730,6 +762,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       submitAnswer,
       buzz,
       skip,
+      skipPuzzle,
       placeBid,
       withdraw,
       clearResult,
