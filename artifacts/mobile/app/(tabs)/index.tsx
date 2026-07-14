@@ -114,6 +114,12 @@ export default function HomeScreen() {
     router.push(user ? '/friends' : '/auth-login');
   };
 
+  const handleProfile = () => {
+    playClick();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push(user ? '/profile' : '/auth-login');
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -152,6 +158,13 @@ export default function HomeScreen() {
               </Text>
             </View>
           </TouchableOpacity>
+          {user && (
+            <TouchableOpacity onPress={handleProfile} activeOpacity={0.85}>
+              <View style={[S.leaderboardBtn, S.profileBtn, { borderColor: '#FFD700' }]}>
+                <Ionicons name="person-circle-outline" size={22} color="#FFD700" />
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* ── Step: mode ─────────────────────────────────────────────────── */}
@@ -597,4 +610,5 @@ const S = StyleSheet.create({
     backgroundColor: 'rgba(255,215,0,0.06)',
   },
   leaderboardBtnTxt: { fontSize: 13, fontFamily: 'Inter_700Bold' },
+  profileBtn: { width: 44, paddingHorizontal: 0 },
 });

@@ -5,15 +5,16 @@
  *   room:update, room:matched, room:readyUpdate, room:readyCountdown,
  *   game:started, game:roundStart, game:question,
  *   game:answerResult, game:round1Answer, game:answerAck,
- *   game:bidUpdate, game:auctionWon, game:auctionResult,
+ *   game:bidUpdate, game:auctionWon, game:auctionResult, game:withdraw,
+ *   game:round2Start, game:round2Answer, game:round2Result,
  *   game:buzzResult, game:round4Reveal, game:questionReveal,
- *   game:playerLeft, game:over, game:state, voice:clip
+ *   game:playerLeft, game:over, game:state
  *
  * Client events emitted:
  *   room:create, room:join, room:leave, room:start,
  *   matchmaking:join, matchmaking:cancel,
  *   player:ready,
- *   game:submitAnswer, game:buzz, game:skip, game:bid, voice:clip
+ *   game:submitAnswer, game:buzz, game:skip, game:bid, game:withdraw
  */
 
 import React, {
@@ -89,6 +90,26 @@ export interface Round1Answer {
   questionStrikes: Record<string, number>;
 }
 
+// Round 2 — one entry per submitted guess during the answer phase (live feed)
+export interface Round2Answer {
+  userId: string;
+  text: string;
+  correct: boolean;
+  correctCount: number;
+  wrongCount: number;
+  neededCount: number;
+}
+
+export interface Round2Result {
+  winnerUserId: string | null;
+  outcome: 'won' | 'timeout';
+  pointsAwarded: number;
+  correctCount: number;
+  bidAmount: number;
+  possibleAnswers: string[];
+  scores: Record<string, number>;
+}
+
 export interface OnlineGameState {
   connected: boolean;
   error: string | null;
@@ -115,9 +136,14 @@ export interface OnlineGameState {
   // Round 2 – auction
   currentBid: { userId: string; amount: number } | null;
   biddingDeadline: number | null;
-  auctionWonBy: { winnerUserId: string; amount: number; deadlineTs: number } | null;
+  // set once bidding closes; deadlineTs (generic field below) carries the
+  // countdown-end / answer-deadline timestamp depending on `phase`
+  auctionWonBy: { winnerUserId: string; amount: number } | null;
+  round2Answers: Round2Answer[];
+  round2Result: Round2Result | null;
+  withdrawInfo: { withdrawnBy: string; winnerUserId: string; amount: number } | null;
 
-  // Buzzer rounds
+  // Buzzer round (Round 3 only)
   buzzWinner: { userId: string; deadlineTs: number } | null;
 
   // Result display (auto-clears after 2.8 s)
@@ -140,9 +166,6 @@ export interface OnlineGameState {
     tied: string[];
     decidedByTiebreaker?: boolean;
   } | null;
-
-  // Voice clip received (latest, consumed by caller)
-  lastVoiceClip: { fromUserId: string; data: unknown; mimeType: string } | null;
 }
 
 const INITIAL_STATE: OnlineGameState = {
@@ -162,6 +185,9 @@ const INITIAL_STATE: OnlineGameState = {
   currentBid: null,
   biddingDeadline: null,
   auctionWonBy: null,
+  round2Answers: [],
+  round2Result: null,
+  withdrawInfo: null,
   buzzWinner: null,
   lastResult: null,
   round4Results: null,
@@ -169,7 +195,6 @@ const INITIAL_STATE: OnlineGameState = {
   transitionRound: null,
   revealedAnswer: null,
   gameOver: null,
-  lastVoiceClip: null,
 };
 
 // ── Context interface ──────────────────────────────────────────────────────────
@@ -196,16 +221,10 @@ interface OnlineGameContextValue {
   buzz: () => void;
   skip: () => void;
   placeBid: (amount: number) => void;
-
-  sendVoiceClip: (data: unknown, mimeType: string) => void;
-  /** Emit a raw signaling message via the shared socket (used by VoiceContext) */
-  emitVoiceSignal: (event: string, payload: unknown) => void;
-  /** Register a one-time listener on the shared socket (used by VoiceContext) */
-  getSocket: () => import('socket.io-client').Socket | null;
+  withdraw: () => void;
 
   clearResult: () => void;
   clearRevealedAnswer: () => void;
-  clearVoiceClip: () => void;
 }
 
 const OnlineGameContext = createContext<OnlineGameContextValue | null>(null);
@@ -219,6 +238,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
   const [myToken,  setMyToken]    = useState<string | null>(null);
   const resultTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const withdrawTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Countdown helper (client-side 3-2-1) ───────────────────────────────────
   const startReadyCountdown = useCallback((from: number) => {
@@ -308,6 +328,9 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         currentBid: null,
         biddingDeadline: null,
         auctionWonBy: null,
+        round2Answers: [],
+        round2Result: null,
+        withdrawInfo: null,
         buzzWinner: null,
         round4Results: null,
         round4CorrectAnswer: null,
@@ -351,8 +374,10 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
           revealedAnswer: null,
           round4Results: null,
           round4CorrectAnswer: null,
-          // Reset answer feed only on a truly new question
+          round2Result: null,
+          // Reset answer feeds only on a truly new question
           round1Answers: sameQuestion ? s.round1Answers : [],
+          round2Answers: sameQuestion ? s.round2Answers : [],
         };
       });
     });
@@ -407,12 +432,41 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       }));
     });
 
-    socket.on('game:auctionWon', (payload: { winnerUserId: string; amount: number; deadlineTs: number }) => {
+    // Bidding closed — 3s "المزاد سيبدأ..." countdown before the answer phase.
+    // `startAt` is when the answer phase begins; reuse the generic
+    // deadlineTs field to drive the countdown ring.
+    socket.on('game:auctionWon', (payload: { winnerUserId: string; amount: number; countdownMs: number; startAt: number }) => {
+      setState((s) => ({
+        ...s,
+        phase: 'round2_countdown',
+        auctionWonBy: { winnerUserId: payload.winnerUserId, amount: payload.amount },
+        deadlineTs: payload.startAt,
+        round2Answers: [],
+        round2Result: null,
+      }));
+    });
+
+    socket.on('game:round2Start', (payload: { winnerUserId: string; amount: number; deadlineTs: number }) => {
       setState((s) => ({
         ...s,
         phase: 'round2_answer',
-        auctionWonBy: payload,
+        auctionWonBy: { winnerUserId: payload.winnerUserId, amount: payload.amount },
         deadlineTs: payload.deadlineTs,
+      }));
+    });
+
+    // Live feed: every guess from the auction winner, validated instantly.
+    socket.on('game:round2Answer', (payload: Round2Answer) => {
+      setState((s) => ({ ...s, round2Answers: [...s.round2Answers, payload] }));
+    });
+
+    socket.on('game:round2Result', (payload: Round2Result) => {
+      setState((s) => ({
+        ...s,
+        phase: 'round_end',
+        round2Result: payload,
+        scores: payload.scores,
+        auctionWonBy: null,
       }));
     });
 
@@ -420,20 +474,24 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       setState((s) => ({ ...s, auctionWonBy: null }));
     });
 
-    // ── Buzzer rounds ────────────────────────────────────────────────────────
+    // Opponent surrendered during bidding — instant win, skip straight to countdown.
+    socket.on('game:withdraw', (payload: { withdrawnBy: string; winnerUserId: string; amount: number }) => {
+      if (withdrawTimerRef.current) clearTimeout(withdrawTimerRef.current);
+      setState((s) => ({ ...s, withdrawInfo: payload }));
+      withdrawTimerRef.current = setTimeout(() => {
+        setState((s) => ({ ...s, withdrawInfo: null }));
+      }, 3000);
+    });
+
+    // ── Buzzer round (Round 3 only) ──────────────────────────────────────────
 
     socket.on('game:buzzResult', (payload: { winnerUserId: string; deadlineTs: number }) => {
-      setState((s) => {
-        const buzzPhase = s.currentRound === 'round3' ? 'round3_answer'
-          : s.currentRound === 'round5' ? 'round5_answer'
-          : 'tiebreaker_answer';
-        return {
-          ...s,
-          phase: buzzPhase,
-          buzzWinner: { userId: payload.winnerUserId, deadlineTs: payload.deadlineTs },
-          deadlineTs: payload.deadlineTs,
-        };
-      });
+      setState((s) => ({
+        ...s,
+        phase: 'round3_answer',
+        buzzWinner: { userId: payload.winnerUserId, deadlineTs: payload.deadlineTs },
+        deadlineTs: payload.deadlineTs,
+      }));
     });
 
     // ── Round 4 – Rapid Fire reveal ──────────────────────────────────────────
@@ -501,12 +559,6 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
         currentBid: payload.currentBid,
       }));
     });
-
-    // ── Voice relay ──────────────────────────────────────────────────────────
-
-    socket.on('voice:clip', (payload: { fromUserId: string; data: unknown; mimeType: string }) => {
-      setState((s) => ({ ...s, lastVoiceClip: payload }));
-    });
   }, [startReadyCountdown]);
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -525,6 +577,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    if (withdrawTimerRef.current) clearTimeout(withdrawTimerRef.current);
     socketRef.current?.disconnect();
     socketRef.current = null;
     myUserIdRef.current = null;
@@ -539,6 +592,7 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       socketRef.current?.disconnect();
       if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (withdrawTimerRef.current) clearTimeout(withdrawTimerRef.current);
     };
   }, []);
 
@@ -644,15 +698,9 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
     socketRef.current?.emit('game:bid', { amount });
   }, []);
 
-  const sendVoiceClip = useCallback((data: unknown, mimeType: string) => {
-    socketRef.current?.emit('voice:clip', { data, mimeType });
+  const withdraw = useCallback(() => {
+    socketRef.current?.emit('game:withdraw');
   }, []);
-
-  const emitVoiceSignal = useCallback((event: string, payload: unknown) => {
-    socketRef.current?.emit(event, payload);
-  }, []);
-
-  const getSocket = useCallback(() => socketRef.current, []);
 
   // ── UI helpers ─────────────────────────────────────────────────────────────
 
@@ -663,10 +711,6 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
 
   const clearRevealedAnswer = useCallback(() => {
     setState((s) => ({ ...s, revealedAnswer: null }));
-  }, []);
-
-  const clearVoiceClip = useCallback(() => {
-    setState((s) => ({ ...s, lastVoiceClip: null }));
   }, []);
 
   return (
@@ -687,12 +731,9 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       buzz,
       skip,
       placeBid,
-      sendVoiceClip,
-      emitVoiceSignal,
-      getSocket,
+      withdraw,
       clearResult,
       clearRevealedAnswer,
-      clearVoiceClip,
     }}>
       {children}
     </OnlineGameContext.Provider>

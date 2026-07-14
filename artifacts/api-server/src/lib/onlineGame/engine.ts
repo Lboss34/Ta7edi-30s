@@ -18,17 +18,16 @@ const ROUND1_QUESTIONS      = 3;     // exactly 3 questions per spec
 const ROUND1_STRIKES_MAX    = 3;     // strikes per player PER QUESTION
 const LIMITS = { round2: 3, round3: 8, round4: 8, round5: 4 };
 
-const ROUND1_TIME_MS         = 6_000;
+const ROUND1_TIME_MS         = 20_000; // spec: turn timer raised to 20s
 const ROUND2_BID_TIME_MS     = 6_000;
-const ROUND2_ANSWER_TIME_MS  = 15_000;
+const ROUND2_COUNTDOWN_MS    = 3_000;  // "المزاد سيبدأ..." pre-answer countdown
+const ROUND2_ANSWER_TIME_MS  = 30_000; // spec: strict 30s answer timer
 const ROUND3_BUZZ_WINDOW_MS  = 20_000;
 const ROUND3_ANSWER_TIME_MS  = 10_000;
 const ROUND4_TIME_MS         = 10_000;
 const ROUND4_REVEAL_MS       = 3_000;
-const ROUND5_BUZZ_WINDOW_MS  = 25_000;
-const ROUND5_ANSWER_TIME_MS  = 12_000;
-const TIEBREAKER_BUZZ_WINDOW_MS = 30_000;
-const TIEBREAKER_ANSWER_TIME_MS = 12_000;
+const ROUND5_GUESS_TIME_MS   = 25_000;
+const TIEBREAKER_GUESS_TIME_MS = 30_000;
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
@@ -312,7 +311,24 @@ export function handleSkip(io: Server, room: Room, userId: string) {
   setTimeout(() => emitRound1Turn(io, room), 800);
 }
 
-// ─────────────────────────── Round 2: Auction ───────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Round 2 — Auction (المزاد), rewritten per spec:
+//   • Bidding phase: highest bidder wins when the bidding timer expires, OR
+//     the other player can instantly win by clicking "Withdraw" (surrender).
+//   • A 3s "المزاد سيبدأ..." countdown separates bidding from answering.
+//   • Winner has a strict 30s window to name as many correct items as their
+//     bid amount, submitting one guess at a time. Every guess is validated
+//     instantly and broadcast (green if correct, red if wrong) — no penalty
+//     for wrong guesses, matching offline's tiered scoring model.
+//   • Scoring on success uses offline's tiered formula: <20 → 1pt,
+//     otherwise 2 + floor((bid-20)/10). Failure (quota not met by the
+//     deadline) awards 0 points.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function auctionPoints(bid: number): number {
+  if (bid < 20) return 1;
+  return 2 + Math.floor((bid - 20) / 10);
+}
 
 function setupRound2(io: Server, room: Room) {
   const topics = room.questions!.round2;
@@ -336,6 +352,9 @@ function askRound2Topic(io: Server, room: Room) {
   room.phase = "round2_bidding";
   room.currentBid = null;
   room.auctionWinnerUserId = null;
+  room.round2CorrectCount = 0;
+  room.round2WrongCount = 0;
+  room.round2AnsweredSet = new Set();
   room.biddingDeadline = Date.now() + ROUND2_BID_TIME_MS;
 
   emitRoom(io, room, "game:question", {
@@ -362,6 +381,19 @@ export function placeBid(room: Room, io: Server, userId: string, amount: number)
   schedule(room, ROUND2_BID_TIME_MS, () => closeBidding(io, room));
 }
 
+/** A player surrenders during bidding — the opponent instantly wins the auction. */
+export function withdrawBid(io: Server, room: Room, userId: string) {
+  if (room.phase !== "round2_bidding") return;
+  const opponent = room.players.find((p) => p.userId !== userId && p.connected);
+  if (!opponent) return;
+  const amount = room.currentBid && room.currentBid.userId === opponent.userId
+    ? room.currentBid.amount
+    : Math.max(room.currentBid?.amount ?? 0, 1);
+
+  emitRoom(io, room, "game:withdraw", { withdrawnBy: userId, winnerUserId: opponent.userId, amount });
+  startRound2Countdown(io, room, opponent.userId, amount);
+}
+
 function closeBidding(io: Server, room: Room) {
   if (room.phase !== "round2_bidding") return;
   if (!room.currentBid) {
@@ -370,56 +402,128 @@ function closeBidding(io: Server, room: Room) {
     setTimeout(() => askRound2Topic(io, room), 1500);
     return;
   }
-
-  room.auctionWinnerUserId = room.currentBid.userId;
-  room.phase = "round2_answer";
-  room.questionDeadline = Date.now() + ROUND2_ANSWER_TIME_MS;
-  emitRoom(io, room, "game:auctionWon", {
-    winnerUserId: room.auctionWinnerUserId,
-    amount:       room.currentBid.amount,
-    deadlineTs:   room.questionDeadline,
-  });
-  schedule(room, ROUND2_ANSWER_TIME_MS, () => resolveRound2Answer(io, room, room.auctionWinnerUserId!, null));
+  startRound2Countdown(io, room, room.currentBid.userId, room.currentBid.amount);
 }
 
-function resolveRound2Answer(io: Server, room: Room, userId: string, submittedText: string | null) {
+/** 3-second "المزاد سيبدأ..." countdown between bidding close and the answer phase. */
+function startRound2Countdown(io: Server, room: Room, winnerUserId: string, amount: number) {
+  room.auctionWinnerUserId = winnerUserId;
+  room.currentBid = { userId: winnerUserId, amount };
+  room.phase = "round2_countdown";
+  room.round2CorrectCount = 0;
+  room.round2WrongCount = 0;
+  room.round2AnsweredSet = new Set();
+
+  emitRoom(io, room, "game:auctionWon", {
+    winnerUserId,
+    amount,
+    countdownMs: ROUND2_COUNTDOWN_MS,
+    startAt: Date.now() + ROUND2_COUNTDOWN_MS,
+  });
+
+  schedule(room, ROUND2_COUNTDOWN_MS, () => beginRound2Answer(io, room, winnerUserId, amount));
+}
+
+function beginRound2Answer(io: Server, room: Room, winnerUserId: string, amount: number) {
+  if (room.phase !== "round2_countdown") return;
+  room.phase = "round2_answer";
+  room.questionDeadline = Date.now() + ROUND2_ANSWER_TIME_MS;
+
+  emitRoom(io, room, "game:round2Start", {
+    winnerUserId,
+    amount,
+    deadlineTs: room.questionDeadline,
+  });
+
+  schedule(room, ROUND2_ANSWER_TIME_MS, () => finishRound2(io, room, "timeout"));
+}
+
+/** Winner submits guesses one at a time; each is validated instantly (green/red). */
+export function submitRound2Answer(io: Server, room: Room, userId: string, submittedText: string) {
   if (room.phase !== "round2_answer" || room.auctionWinnerUserId !== userId) return;
   const topic = room.questions!.round2[room.questionIndex]!;
-  const player = room.players.find((p) => p.userId === userId)!;
   const bidAmount = room.currentBid?.amount ?? 0;
-  const correct = submittedText !== null && isAnswerCorrect(submittedText, topic.possibleAnswers);
 
-  player.score = correct ? player.score + bidAmount : Math.max(0, player.score - bidAmount);
+  let matchedAnswer: string | null = null;
+  for (const candidate of topic.possibleAnswers) {
+    const key = candidate.trim().toLowerCase();
+    if (room.round2AnsweredSet.has(key)) continue;
+    if (isAnswerCorrect(submittedText, [candidate])) {
+      matchedAnswer = candidate;
+      break;
+    }
+  }
+  const correct = matchedAnswer !== null;
 
-  emitRoom(io, room, "game:answerResult", {
-    round:         "round2",
+  if (correct) {
+    room.round2AnsweredSet.add(matchedAnswer!.trim().toLowerCase());
+    room.round2CorrectCount += 1;
+  } else {
+    room.round2WrongCount += 1;
+  }
+
+  emitRoom(io, room, "game:round2Answer", {
     userId,
-    submittedText,
+    text: submittedText,
     correct,
-    correctAnswer: topic.possibleAnswers[0] ?? "",
-    scores:        scoreMap(room),
+    correctCount: room.round2CorrectCount,
+    wrongCount: room.round2WrongCount,
+    neededCount: bidAmount,
+  });
+
+  if (room.round2CorrectCount >= bidAmount) {
+    finishRound2(io, room, "won");
+  }
+}
+
+function finishRound2(io: Server, room: Room, outcome: "won" | "timeout") {
+  if (room.phase !== "round2_answer") return;
+  clearTimer(room);
+  const topic = room.questions!.round2[room.questionIndex]!;
+  const winner = room.players.find((p) => p.userId === room.auctionWinnerUserId);
+  const bidAmount = room.currentBid?.amount ?? 0;
+  let pointsAwarded = 0;
+
+  if (outcome === "won" && winner) {
+    pointsAwarded = auctionPoints(bidAmount);
+    winner.score += pointsAwarded;
+  }
+
+  room.phase = "round_end";
+  emitRoom(io, room, "game:round2Result", {
+    winnerUserId: room.auctionWinnerUserId,
+    outcome,
+    pointsAwarded,
+    correctCount: room.round2CorrectCount,
+    bidAmount,
+    possibleAnswers: topic.possibleAnswers,
+    scores: scoreMap(room),
   });
 
   room.questionIndex += 1;
-  setTimeout(() => askRound2Topic(io, room), 1500);
+  setTimeout(() => askRound2Topic(io, room), 2200);
 }
 
-// ─────────────────────────── Generic buzzer round ───────────────────────────
+// ─────────────────────────── Generic buzzer round (Round 3 only) ─────────────
+// Round 3 keeps the real buzz-in lock (it's a genuine buzzer round offline
+// too): eligible players race to buzz, the first buzzer gets an exclusive
+// answer window, and a wrong answer bars them from the current question
+// only (others may re-buzz/steal).
 
 interface BuzzerRoundConfig {
-  roundKey:          "round3" | "round5" | "tiebreaker";
-  buzzPhase:         "round3_buzz" | "round5_buzz" | "tiebreaker_buzz";
-  answerPhase:       "round3_answer" | "round5_answer" | "tiebreaker_answer";
+  roundKey:          "round3";
+  buzzPhase:         "round3_buzz";
+  answerPhase:       "round3_answer";
   buzzWindowMs:      number;
   answerTimeMs:      number;
   pointValue:        number;
-  getQuestionPublic: (q: BuzzerQuestion | TransferPuzzle) => Record<string, unknown>;
-  getValidAnswers:   (q: BuzzerQuestion | TransferPuzzle) => string[];
+  getQuestionPublic: (q: BuzzerQuestion) => Record<string, unknown>;
+  getValidAnswers:   (q: BuzzerQuestion) => string[];
   eligibleUserIds:   (room: Room) => string[];
   onQuestionResolved:(io: Server, room: Room, winnerUserId: string | null, correct: boolean) => void;
 }
 
-function askBuzzerQuestion(io: Server, room: Room, question: BuzzerQuestion | TransferPuzzle, cfg: BuzzerRoundConfig) {
+function askBuzzerQuestion(io: Server, room: Room, question: BuzzerQuestion, cfg: BuzzerRoundConfig) {
   room.phase = cfg.buzzPhase;
   room.buzzLock = null;
   room.excludedFromBuzz = new Set();
@@ -452,14 +556,12 @@ export function buzz(room: Room, io: Server, userId: string, cfg: BuzzerRoundCon
   room.phase = cfg.answerPhase;
   emitRoom(io, room, "game:buzzResult", { winnerUserId: userId, deadlineTs: room.buzzLock.answerDeadline });
 
-  const question = currentBuzzerQuestion(room, cfg);
+  const question = currentBuzzerQuestion(room);
   schedule(room, cfg.answerTimeMs, () => resolveBuzzerAnswer(io, room, userId, null, question!, cfg));
 }
 
-function currentBuzzerQuestion(room: Room, cfg: BuzzerRoundConfig): BuzzerQuestion | TransferPuzzle | undefined {
-  if (cfg.roundKey === "round3") return room.questions!.round3[room.questionIndex];
-  if (cfg.roundKey === "round5") return room.questions!.round5[room.questionIndex];
-  return room.tiebreakerPool[room.tiebreakerIndex];
+function currentBuzzerQuestion(room: Room): BuzzerQuestion | undefined {
+  return room.questions!.round3[room.questionIndex];
 }
 
 export function resolveBuzzerAnswer(
@@ -467,7 +569,7 @@ export function resolveBuzzerAnswer(
   room: Room,
   userId: string,
   submittedText: string | null,
-  question: BuzzerQuestion | TransferPuzzle,
+  question: BuzzerQuestion,
   cfg: BuzzerRoundConfig,
 ) {
   if (room.phase !== cfg.answerPhase || room.buzzLock?.userId !== userId) return;
@@ -512,7 +614,7 @@ export function resolveBuzzerAnswer(
 function revealBuzzerAnswer(
   io: Server,
   room: Room,
-  question: BuzzerQuestion | TransferPuzzle,
+  question: BuzzerQuestion,
   cfg: BuzzerRoundConfig,
   winnerUserId: string | null,
   correct: boolean,
@@ -533,9 +635,9 @@ function round3Config(): BuzzerRoundConfig {
     answerPhase:       "round3_answer",
     buzzWindowMs:      ROUND3_BUZZ_WINDOW_MS,
     answerTimeMs:      ROUND3_ANSWER_TIME_MS,
-    pointValue:        2,
-    getQuestionPublic: (q) => ({ id: q.id, question: (q as BuzzerQuestion).question, choices: (q as BuzzerQuestion).choices }),
-    getValidAnswers:   (q) => [(q as BuzzerQuestion).answer],
+    pointValue:        1, // offline parity: 1 point per correct buzz-in answer
+    getQuestionPublic: (q) => ({ id: q.id, question: q.question, choices: q.choices }),
+    getValidAnswers:   (q) => [q.answer],
     eligibleUserIds:   (room) => connectedActive(room).map((p) => p.userId),
     onQuestionResolved:(io, room) => {
       room.questionIndex += 1;
@@ -635,22 +737,99 @@ function revealRound4(io: Server, room: Room) {
   setTimeout(() => askRound4Question(io, room), ROUND4_REVEAL_MS);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Generic "race" round (Round 5 + Tiebreaker) — offline parity:
+// offline party mode has NO buzzer for these rounds ("simultaneous guessing;
+// no buzzers or barring for wrong answers"). Any eligible player may submit
+// a guess at any moment during the window; every guess is validated
+// instantly and broadcast to both players. A wrong guess does not eliminate
+// the player — they (and the opponent) can keep guessing. The first correct
+// guess wins the point immediately and the puzzle ends right away.
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface RaceRoundConfig {
+  roundKey:          "round5" | "tiebreaker";
+  phase:             "round5_guess" | "tiebreaker_guess";
+  windowMs:          number;
+  pointValue:        number;
+  getQuestionPublic: (q: TransferPuzzle) => Record<string, unknown>;
+  getValidAnswers:   (q: TransferPuzzle) => string[];
+  eligibleUserIds:   (room: Room) => string[];
+  currentQuestion:   (room: Room) => TransferPuzzle | undefined;
+  onResolved:        (io: Server, room: Room, winnerUserId: string | null, correct: boolean) => void;
+}
+
+function askRaceQuestion(io: Server, room: Room, question: TransferPuzzle, cfg: RaceRoundConfig) {
+  room.phase = cfg.phase;
+  room.raceResolved = false;
+  room.questionDeadline = Date.now() + cfg.windowMs;
+
+  emitRoom(io, room, "game:question", {
+    round:      cfg.roundKey,
+    phase:      room.phase,
+    question:   cfg.getQuestionPublic(question),
+    deadlineTs: room.questionDeadline,
+    scores:     scoreMap(room),
+  });
+
+  schedule(room, cfg.windowMs, () => {
+    if (room.phase === cfg.phase && !room.raceResolved) {
+      revealRace(io, room, question, cfg, null, false);
+    }
+  });
+}
+
+/** Any eligible player may call this at any time during the window. */
+export function submitRaceAnswer(io: Server, room: Room, userId: string, submittedText: string, cfg: RaceRoundConfig) {
+  if (room.phase !== cfg.phase || room.raceResolved) return;
+  if (!cfg.eligibleUserIds(room).includes(userId)) return;
+  const player = room.players.find((p) => p.userId === userId && p.connected);
+  if (!player) return;
+
+  const question = cfg.currentQuestion(room);
+  if (!question) return;
+  const correct = isAnswerCorrect(submittedText, cfg.getValidAnswers(question));
+
+  emitRoom(io, room, "game:answerResult", {
+    round:         cfg.roundKey,
+    userId,
+    submittedText,
+    correct,
+    correctAnswer: correct ? cfg.getValidAnswers(question)[0] ?? "" : "",
+    scores:        scoreMap(room),
+  });
+
+  if (!correct) return; // wrong guess: no elimination — anyone can keep guessing
+
+  room.raceResolved = true;
+  if (cfg.pointValue > 0) player.score += cfg.pointValue;
+  revealRace(io, room, question, cfg, userId, true);
+}
+
+function revealRace(io: Server, room: Room, question: TransferPuzzle, cfg: RaceRoundConfig, winnerUserId: string | null, correct: boolean) {
+  clearTimer(room);
+  emitRoom(io, room, "game:questionReveal", {
+    round:         cfg.roundKey,
+    correctAnswer: cfg.getValidAnswers(question)[0] ?? "",
+  });
+  cfg.onResolved(io, room, winnerUserId, correct);
+}
+
 // ─── Round 5: Transfer Puzzle ────────────────────────────────────────────────
 
-function round5Config(): BuzzerRoundConfig {
+function round5Config(): RaceRoundConfig {
   return {
     roundKey:          "round5",
-    buzzPhase:         "round5_buzz",
-    answerPhase:       "round5_answer",
-    buzzWindowMs:      ROUND5_BUZZ_WINDOW_MS,
-    answerTimeMs:      ROUND5_ANSWER_TIME_MS,
-    pointValue:        3,
-    getQuestionPublic: (q) => ({ id: q.id, transfers: (q as TransferPuzzle).transfers }),
-    getValidAnswers:   (q) => [(q as TransferPuzzle).answer],
+    phase:             "round5_guess",
+    windowMs:          ROUND5_GUESS_TIME_MS,
+    pointValue:        1, // offline parity: 1 point for the first correct shout
+    getQuestionPublic: (q) => ({ id: q.id, transfers: q.transfers }),
+    getValidAnswers:   (q) => [q.answer],
     eligibleUserIds:   (room) => connectedActive(room).map((p) => p.userId),
-    onQuestionResolved:(io, room) => {
+    currentQuestion:   (room) => room.questions!.round5[room.questionIndex],
+    onResolved: (io, room) => {
       room.questionIndex += 1;
-      setTimeout(() => askRound5Question(io, room), 1500);
+      setTimeout(() => askRound5Question(io, room), 1800);
     },
   };
 }
@@ -668,7 +847,7 @@ function setupRound5(io: Server, room: Room) {
 function askRound5Question(io: Server, room: Room) {
   if (room.questionIndex >= room.maxQuestionsThisRound) { finishGame(io, room); return; }
   const puzzle = room.questions!.round5[room.questionIndex]!;
-  askBuzzerQuestion(io, room, puzzle, round5Config());
+  askRaceQuestion(io, room, puzzle, round5Config());
 }
 
 // ─── Game end + Tiebreaker ────────────────────────────────────────────────────
@@ -697,18 +876,17 @@ function finishGame(io: Server, room: Room) {
   askTiebreakerQuestion(io, room);
 }
 
-function tiebreakerConfig(): BuzzerRoundConfig {
+function tiebreakerConfig(): RaceRoundConfig {
   return {
     roundKey:          "tiebreaker",
-    buzzPhase:         "tiebreaker_buzz",
-    answerPhase:       "tiebreaker_answer",
-    buzzWindowMs:      TIEBREAKER_BUZZ_WINDOW_MS,
-    answerTimeMs:      TIEBREAKER_ANSWER_TIME_MS,
-    pointValue:        0,
-    getQuestionPublic: (q) => ({ id: q.id, transfers: (q as TransferPuzzle).transfers }),
-    getValidAnswers:   (q) => [(q as TransferPuzzle).answer],
+    phase:             "tiebreaker_guess",
+    windowMs:          TIEBREAKER_GUESS_TIME_MS,
+    pointValue:        0, // no score points — sudden death wins the whole game
+    getQuestionPublic: (q) => ({ id: q.id, transfers: q.transfers }),
+    getValidAnswers:   (q) => [q.answer],
     eligibleUserIds:   (room) => room.tiebreakerCandidates,
-    onQuestionResolved:(io, room, winnerUserId, correct) => {
+    currentQuestion:   (room) => room.tiebreakerPool[room.tiebreakerIndex],
+    onResolved: (io, room, winnerUserId, correct) => {
       if (correct && winnerUserId) {
         room.status = "finished";
         room.phase = "game_over";
@@ -732,14 +910,14 @@ function tiebreakerConfig(): BuzzerRoundConfig {
         });
         return;
       }
-      setTimeout(() => askTiebreakerQuestion(io, room), 1500);
+      setTimeout(() => askTiebreakerQuestion(io, room), 1800);
     },
   };
 }
 
 function askTiebreakerQuestion(io: Server, room: Room) {
   const puzzle = room.tiebreakerPool[room.tiebreakerIndex]!;
-  askBuzzerQuestion(io, room, puzzle, tiebreakerConfig());
+  askRaceQuestion(io, room, puzzle, tiebreakerConfig());
 }
 
 // ─── Shared dispatch entry points (from socket handlers) ─────────────────────
@@ -750,7 +928,7 @@ export function handleSubmitAnswer(io: Server, room: Room, userId: string, text:
       resolveRound1FromSubmit(io, room, userId, text);
       return;
     case "round2":
-      resolveRound2Answer(io, room, userId, text);
+      submitRound2Answer(io, room, userId, text);
       return;
     case "round3": {
       const q = room.questions!.round3[room.questionIndex];
@@ -760,23 +938,22 @@ export function handleSubmitAnswer(io: Server, room: Room, userId: string, text:
     case "round4":
       submitRound4Answer(room, io, userId, text);
       return;
-    case "round5": {
-      const q = room.questions!.round5[room.questionIndex];
-      if (q) resolveBuzzerAnswer(io, room, userId, text, q, round5Config());
+    case "round5":
+      submitRaceAnswer(io, room, userId, text, round5Config());
       return;
-    }
-    case "tiebreaker": {
-      const q = room.tiebreakerPool[room.tiebreakerIndex];
-      if (q) resolveBuzzerAnswer(io, room, userId, text, q, tiebreakerConfig());
+    case "tiebreaker":
+      submitRaceAnswer(io, room, userId, text, tiebreakerConfig());
       return;
-    }
   }
 }
 
 export function handleBuzz(io: Server, room: Room, userId: string) {
-  if (room.currentRound === "round3")      buzz(room, io, userId, round3Config());
-  else if (room.currentRound === "round5") buzz(room, io, userId, round5Config());
-  else if (room.currentRound === "tiebreaker") buzz(room, io, userId, tiebreakerConfig());
+  // Only Round 3 uses the buzz-in mechanic; Round 5/Tiebreaker are freeform races.
+  if (room.currentRound === "round3") buzz(room, io, userId, round3Config());
+}
+
+export function handleWithdraw(io: Server, room: Room, userId: string) {
+  if (room.currentRound === "round2") withdrawBid(io, room, userId);
 }
 
 /** Full state snapshot for a reconnecting client. */

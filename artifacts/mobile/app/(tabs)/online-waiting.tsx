@@ -19,7 +19,6 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnlineGame } from '@/contexts/OnlineGameContext';
 import { useColors } from '@/hooks/useColors';
-import { useVoice } from '@/contexts/VoiceContext';
 
 const DIFF_COLORS: Record<string, string> = { easy: '#00C853', medium: '#FFB300', hard: '#FF3B3B' };
 const DIFF_LABELS: Record<string, string> = { easy: 'سهل', medium: 'متوسط', hard: 'صعب' };
@@ -196,44 +195,13 @@ function MatchFoundScreen() {
   );
 }
 
-// ── Mic button component ──────────────────────────────────────────────────────
-
-function MicButton({ size = 38 }: { size?: number }) {
-  const voice = useVoice();
-  if (!voice) return null;
-
-  const { isAvailable, isActive, isMuted, toggleMute } = voice;
-
-  // Not available = native build not done yet
-  if (!isAvailable) return null;
-
-  const color  = !isActive ? '#FFFFFF33' : isMuted ? '#FF3B3B' : '#00C853';
-  const icon   = isMuted ? 'mic-off' : 'mic';
-
-  return (
-    <TouchableOpacity
-      onPress={toggleMute}
-      activeOpacity={0.75}
-      style={{
-        width: size, height: size, borderRadius: size / 2,
-        backgroundColor: `${color}18`,
-        borderWidth: 1.5, borderColor: color,
-        alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <Ionicons name={icon as any} size={size * 0.45} color={color} />
-    </TouchableOpacity>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function OnlineWaiting() {
-  const { state, myUserId, getSocket, cancelMatchmaking, leaveRoom, startGame } = useOnlineGame();
+  const { state, myUserId, cancelMatchmaking, leaveRoom, startGame } = useOnlineGame();
   const { room } = state;
   const colors = useColors();
   const router = useRouter();
-  const voice  = useVoice();
   const { top: topPad, bottom: botPad } = useSafeAreaInsets();
   const [copied, setCopied]   = useState(false);
   const [starting, setStarting] = useState(false);
@@ -242,23 +210,7 @@ export default function OnlineWaiting() {
   const isHost = room?.players.find((p) => p.userId === myUserId)?.isHost ?? false;
   const canStart = !!room && room.players.filter((p) => p.connected).length >= 2;
 
-  // ── Voice: start mic as soon as there is a room ──────────────────────────
-  useEffect(() => {
-    if (!room || !myUserId || !voice?.isAvailable) return;
-    const socket = getSocket();
-    if (!socket) return;
-    voice.startVoice().then(ok => {
-      if (!ok) return;
-      const peerIds = room.players
-        .filter(p => p.userId !== myUserId && p.connected)
-        .map(p => p.userId);
-      voice.connectToPeers(socket, myUserId, peerIds);
-    });
-  // Re-run when players list changes (new player joins)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room?.players.length, myUserId]);
-
-  // Navigate to game when playing (do NOT stop voice — game continues speaking)
+  // Navigate to game when playing
   useEffect(() => {
     if (room?.status === 'playing') {
       router.replace('/online-game');
@@ -274,7 +226,6 @@ export default function OnlineWaiting() {
 
   const handleLeave = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    voice?.stopVoice();
     if (state.matchmaking) cancelMatchmaking();
     else leaveRoom();
     router.replace('/online-lobby');
@@ -340,7 +291,6 @@ export default function OnlineWaiting() {
             </Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <MicButton size={36} />
             <View style={[S.diffBadge, { borderColor: DIFF_COLORS[diff] ?? '#FFD700', backgroundColor: `${DIFF_COLORS[diff] ?? '#FFD700'}18` }]}>
               <Text style={[S.diffBadgeTxt, { color: DIFF_COLORS[diff] ?? '#FFD700' }]}>{DIFF_LABELS[diff] ?? diff}</Text>
             </View>

@@ -48,15 +48,14 @@ export type GamePhase =
   | "lobby"
   | "round1_turn"
   | "round2_bidding"
+  | "round2_countdown"
   | "round2_answer"
   | "round3_buzz"
   | "round3_answer"
   | "round4_question"
   | "round4_reveal"
-  | "round5_buzz"
-  | "round5_answer"
-  | "tiebreaker_buzz"
-  | "tiebreaker_answer"
+  | "round5_guess"
+  | "tiebreaker_guess"
   | "round_end"
   | "game_over";
 
@@ -115,10 +114,17 @@ export interface Room {
   currentBid: { userId: string; amount: number } | null;
   biddingDeadline: number | null;
   auctionWinnerUserId: string | null;
+  // Multi-answer quota tracking during round2_answer (winner must name `amount` correct items)
+  round2CorrectCount: number;
+  round2WrongCount: number;
+  round2AnsweredSet: Set<string>; // normalized (lowercased) matched possibleAnswers
 
-  // round3/5/tiebreaker (buzzer race)
+  // round3 (buzzer race — buzz-in lock)
   buzzLock: BuzzLock | null;
   excludedFromBuzz: Set<string>;
+
+  // round5/tiebreaker (simultaneous "race" — no buzz lock, mirrors offline)
+  raceResolved: boolean;
 
   // round4 (simultaneous rapid fire)
   simultaneousAnswers: Map<string, SimultaneousAnswer>;

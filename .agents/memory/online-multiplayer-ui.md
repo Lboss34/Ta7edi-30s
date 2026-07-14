@@ -36,3 +36,19 @@ description: 3 screens (lobby/waiting/game); myUserId is separate context value;
 **Why:** spec required sounds on socket events, not on local actions.
 
 **How to apply:** Sound context must be provided in the tree above `OnlineGameScreen` (it is, via _layout.tsx wrapping with SoundProvider).
+
+## Round 2 (Auction) — multi-guess quota model
+- Winner of the bid must submit `amount` correct guesses before running out of time (no partial credit branch — timeout = 0 points).
+- Flow: bidding → withdraw (opponent can concede anytime, instantly ends bidding in the other player's favor) → 3s "المزاد سيبدأ..." countdown (`round2_countdown` phase) → 30s answer window (`round2_answer`) with live guess feed (`round2Answers[]`) and final `round2Result` banner.
+- The existing generic `deadlineTs` field is reused to drive the countdown ring for both the 3s pre-answer countdown and the 30s answer phase — avoids adding new timer plumbing.
+
+## Rounds 3/5/Tiebreaker — buzzer vs. race split
+- Round 3 kept the buzz-lock mechanic (`BuzzerUI`, phases `round3_buzz`/`round3_answer`).
+- Round 5 and Tiebreaker converted to a freeform "race": no buzzer, text input open the whole window, any eligible player can guess anytime, first correct guess wins, wrong guesses don't eliminate (`RaceUI`, phases `round5_guess`/`tiebreaker_guess`).
+- Race guesses reuse the generic `game:answerResult` event/`ResultOverlay` for instant feedback — no separate feed array needed (unlike Round 2's quota feed, since race has no multi-guess-by-one-player concept).
+
+## Voice chat — fully removed
+Voice chat (WebRTC P2P) was removed entirely from both frontend and backend per product decision. If voice is wanted again, it needs to be rebuilt from scratch — the old `VoiceContext.tsx`, mic buttons, and socket relay are gone.
+
+## Profile screen
+`app/(tabs)/profile.tsx` shows Level/XP-to-next-level/Total Wins via `GET /api/game/stats` (already existed server-side, returns `{level, xp, totalWins, nextLevelXp}`). Entry point: person-circle icon button next to the account button on the home screen, only shown when logged in.

@@ -1,0 +1,37 @@
+Hi Agent. We are executing the ultimate, flawless architectural update for the Online Multiplayer mode. We are COMPLETELY REMOVING the Voice Chat feature, and we are strictly aligning the Online game logic to perfectly mirror our flawless Offline Multiplayer logic. The server must act as the "Automated Referee". 
+
+Please implement the following 7 tasks continuously and sequentially. DO NOT stop until everything is perfectly executed.
+
+### 1. COMPLETE ERADICATION OF VOICE CHAT:
+- Remove ALL traces of `react-native-webrtc` and audio streaming logic from both the frontend and backend.
+- Remove any UI buttons related to mic/mute. We are building a clean, text-and-buzzer only real-time game.
+
+### 2. PROFILE & PROGRESSION UI (Smart & Organized):
+- In the User Profile screen, dynamically display the player's `Level`, `Total Wins`, and calculate the "XP needed for the Next Level".
+- **Logic:** `NextLevelXP = BaseXP * (CurrentLevel ^ 1.5)`. Show exactly how much XP is remaining (e.g., "50 / 150 XP to Level 3"). Make the UI highly organized and visually appealing.
+
+### 3. THE MATCHMAKING "READY" GATE:
+- **Bug Fix:** The "Match Found" screen must NOT auto-transition into the game.
+- **Implementation:** Both players must see a "Match Found!" screen with a "READY" button. The server tracks `readyPlayers`. ONLY when `readyPlayers.length === 2`, the server emits a `start_countdown` event. The UI then shows a 3-second visual countdown (3.. 2.. 1..) and THEN transitions to the Game Screen.
+
+### 4. STAGE 1 STRICT OVERHAUL ("What Do You Know?"):
+- **Current Bug:** The game changes the question after just ONE answer.
+- **The FIX:** BOTH players must share the EXACT SAME question (which has an array of multiple correct answers). They take turns typing answers for this single question until ALL correct answers are revealed, or someone hits the 3-strike limit. Only then does it move to the next question.
+- **Mechanics:** Increase the turn timer to **20 Seconds** per player. Every typed answer (right or wrong) must be instantly broadcasted and displayed on screen.
+- **Winning the Round:** Show a small UI popup indicating who won the point for that question before moving to the next.
+
+### 5. STAGE 2 STRICT LOGIC ("The Auction"):
+- **Bidding Phase:** Provide a "Withdraw" (Surrender) button on the UI for both players. If Player B clicks "Withdraw", Player A instantly wins the auction round.
+- **Pre-Game Countdown:** Once a player wins the auction, do NOT start the typing phase immediately. Show a 3-second visual countdown (3.. 2.. 1..) with the text "The Auction will begin...".
+- **Gameplay:** After the 3s countdown, start a strict **30-second timer** for the winning player. The server must validate every typed answer instantly and display it on screen (Green if correct, Red if wrong).
+
+### 6. OFFLINE PARITY FOR ALL STAGES (Automated Referee):
+- Ensure Stage 3 (Buzzer/Simultaneous) and Stage 4 (Guess the Player / Golden Question) EXACTLY match the offline game rules, score calculations, and logic.
+- **The Automated Referee Rule:** In offline, the phone holder sees the answers. In ONLINE, NO ONE sees the answers. The server holds the answer array and validates inputs behind the scenes, only revealing them when guessed correctly.
+
+### 7. ARCHITECTURAL ADVICE & BEST PRACTICES:
+- **Single Source of Truth:** Manage all game states (timers, strikes, points, turns) strictly on the `Socket.io` Backend, NOT the frontend. 
+- **Prevent Race Conditions:** When shifting turns or changing questions, ensure the backend resets the timers properly before broadcasting the new state.
+- **TypeScript Check:** Run a full type-checking pass to ensure zero `any` types cause crashes in the Zod validation or Expo router.
+
+Please process this entire master plan step-by-step and notify me ONLY when everything is 100% complete and ready for testing!

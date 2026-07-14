@@ -26,7 +26,6 @@ import { useColors } from '@/hooks/useColors';
 import { useOnlineGame, type OnlinePlayer } from '@/contexts/OnlineGameContext';
 import { addLeaderboardEntry } from '@/lib/leaderboard';
 import { useSoundContext } from '@/contexts/SoundContext';
-import { useVoice } from '@/contexts/VoiceContext';
 
 const { width: W } = Dimensions.get('window');
 const PLAYER_COLORS = ['#7B2FFF', '#FFD700', '#00E5FF', '#FF6B00', '#00C853'];
@@ -354,7 +353,7 @@ function Round1UI() {
           <Text style={[R1.turnTxt, { color: turnColor }]}>
             {isMyTurn ? '⚡ دورك! أجب بسرعة' : `⏳ دور ${turnName}`}
           </Text>
-          <CountdownRing secs={secs} maxSecs={6} color={turnColor} />
+          <CountdownRing secs={secs} maxSecs={20} color={turnColor} />
         </View>
 
         {/* Question */}
@@ -475,26 +474,33 @@ const R1 = StyleSheet.create({
 // ── Round 2: Auction ───────────────────────────────────────────────────────────
 
 function Round2UI() {
-  const { state, myUserId, placeBid, submitAnswer } = useOnlineGame();
+  const { state, myUserId, placeBid, submitAnswer, withdraw } = useOnlineGame();
   const colors = useColors();
   const [bidAmount, setBidAmount] = useState(1);
   const [text, setText]           = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const secs     = useCountdown(state.phase === 'round2_bidding' ? state.biddingDeadline : state.deadlineTs);
-  const maxSecs  = state.phase === 'round2_bidding' ? 6 : 15;
+  const secs     = useCountdown(
+    state.phase === 'round2_bidding' ? state.biddingDeadline
+      : state.phase === 'round2_countdown' ? state.deadlineTs
+      : state.phase === 'round2_answer' ? state.deadlineTs
+      : null
+  );
 
   const myScore  = (state.scores[myUserId ?? ''] ?? 0);
   const maxBid   = Math.max(myScore, 10);
   const minBid   = (state.currentBid?.amount ?? 0) + 1;
-  const isBidding = state.phase === 'round2_bidding';
-  const isAnswer  = state.phase === 'round2_answer';
-  const amWinner  = state.auctionWonBy?.winnerUserId === myUserId;
+  const isBidding   = state.phase === 'round2_bidding';
+  const isCountdown = state.phase === 'round2_countdown';
+  const isAnswer    = state.phase === 'round2_answer';
+  const isRoundEnd  = state.phase === 'round_end' && !!state.round2Result;
+  const amWinner    = state.auctionWonBy?.winnerUserId === myUserId;
+  const opponent    = state.room?.players.find(p => p.userId !== myUserId);
+  const amOnlyBidder = isBidding && !!state.currentBid && state.currentBid.userId === myUserId;
 
   useEffect(() => {
     if (isBidding) { setBidAmount(Math.min(Math.max(minBid, bidAmount), maxBid)); }
   }, [state.currentBid?.amount]);
 
-  useEffect(() => { setText(''); setSubmitted(false); }, [state.question?.id]);
+  useEffect(() => { setText(''); }, [state.question?.id, state.round2Answers.length]);
 
   const handleBid = () => {
     if (bidAmount < minBid || bidAmount > maxBid) return;
@@ -502,17 +508,24 @@ function Round2UI() {
     placeBid(bidAmount);
   };
 
+  const handleWithdraw = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    withdraw();
+  };
+
   const handleSubmit = () => {
-    if (!text.trim() || !amWinner || submitted) return;
+    if (!text.trim() || !amWinner) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     submitAnswer(text.trim());
-    setSubmitted(true);
+    setText('');
   };
 
   const winnerColor = state.auctionWonBy ? playerColor(state.room, state.auctionWonBy.winnerUserId) : '#FFD700';
   const winnerName  = state.auctionWonBy ? playerName(state.room, state.auctionWonBy.winnerUserId) : '';
-  const bidderColor = state.currentBid ? playerColor(state.room, state.currentBid.userId) : '#FFD700';
   const bidderName  = state.currentBid ? playerName(state.room, state.currentBid.userId) : null;
+  const needed      = state.auctionWonBy?.amount ?? 0;
+  const correctCount = state.round2Answers.length > 0 ? state.round2Answers[state.round2Answers.length - 1]!.correctCount : 0;
+  const wrongCount   = state.round2Answers.length > 0 ? state.round2Answers[state.round2Answers.length - 1]!.wrongCount : 0;
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -522,6 +535,18 @@ function Round2UI() {
           <Text style={A.topicCategory}>{state.question?.category ?? '📂'}</Text>
           <Text style={[A.topicDesc, { color: colors.foreground }]}>{state.question?.description ?? '...'}</Text>
         </View>
+
+        {/* Withdraw notice */}
+        {state.withdrawInfo && (
+          <View style={[A.winnerBanner, { borderColor: '#FF6B00', backgroundColor: '#FF6B0018' }]}>
+            <Ionicons name="flag" size={18} color="#FF6B00" />
+            <Text style={[A.winnerTxt, { color: '#FF6B00' }]}>
+              {state.withdrawInfo.withdrawnBy === myUserId
+                ? 'انسحبت من المزايدة'
+                : `${playerName(state.room, state.withdrawInfo.withdrawnBy)} انسحب من المزايدة`}
+            </Text>
+          </View>
+        )}
 
         {/* Bidding phase */}
         {isBidding && (
@@ -562,22 +587,64 @@ function Round2UI() {
                   <Text style={A.bidBtnTxt}>زايد {bidAmount}</Text>
                 </LinearGradient>
               </TouchableOpacity>
+
+              {/* Withdraw — only meaningful once someone else has the current bid */}
+              {state.currentBid && !amOnlyBidder && (
+                <TouchableOpacity onPress={handleWithdraw} activeOpacity={0.8} style={{ marginTop: 4 }}>
+                  <View style={[A.withdrawBtn, { borderColor: '#FF3B3B66' }]}>
+                    <Ionicons name="flag-outline" size={16} color="#FF3B3B" />
+                    <Text style={A.withdrawBtnTxt}>
+                      انسحب — {playerName(state.room, state.currentBid.userId)} يفوز بـ{state.currentBid.amount}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
           </>
         )}
 
-        {/* Answer phase */}
+        {/* 3s "المزاد سيبدأ..." countdown */}
+        {isCountdown && state.auctionWonBy && (
+          <View style={[A.countdownWrap, { borderColor: winnerColor, backgroundColor: `${winnerColor}14` }]}>
+            <Ionicons name="trophy" size={22} color={winnerColor} />
+            <Text style={[A.winnerTxt, { color: winnerColor, textAlign: 'center' }]}>
+              {amWinner ? `فزت بالمزاد بـ${state.auctionWonBy.amount}!` : `${winnerName} فاز بالمزاد بـ${state.auctionWonBy.amount}`}
+            </Text>
+            <Text style={[A.countdownLabel, { color: colors.mutedForeground }]}>المزاد سيبدأ...</Text>
+            <CountdownRing secs={secs} maxSecs={3} color={winnerColor} />
+          </View>
+        )}
+
+        {/* Answer phase — multi-guess quota */}
         {isAnswer && state.auctionWonBy && (
           <>
             <View style={[A.winnerBanner, { borderColor: winnerColor, backgroundColor: `${winnerColor}18` }]}>
               <Ionicons name="trophy" size={18} color={winnerColor} />
               <Text style={[A.winnerTxt, { color: winnerColor }]}>
-                {amWinner ? `فزت بالمزاد (+${state.auctionWonBy.amount} نقطة)` : `${winnerName} يجيب... (${state.auctionWonBy.amount} نقطة)`}
+                {amWinner ? `أجب بـ${needed} إجابة صحيحة` : `${winnerName} يجيب... (${needed} مطلوبة)`}
               </Text>
-              <CountdownRing secs={secs} maxSecs={15} color={winnerColor} />
+              <CountdownRing secs={secs} maxSecs={30} color={winnerColor} />
             </View>
 
-            {amWinner && !submitted && (
+            {/* Quota progress */}
+            <View style={A.quotaRow}>
+              <Text style={[A.quotaTxt, { color: '#00C853' }]}>✅ {correctCount}/{needed}</Text>
+              {wrongCount > 0 && <Text style={[A.quotaTxt, { color: '#FF3B3B' }]}>❌ {wrongCount}</Text>}
+            </View>
+
+            {/* Live guess feed */}
+            {state.round2Answers.length > 0 && (
+              <View style={{ gap: 6 }}>
+                {[...state.round2Answers].slice(-5).reverse().map((a, i) => (
+                  <View key={i} style={[A.feedRow, { borderColor: a.correct ? '#00C85333' : '#FF3B3B33', backgroundColor: a.correct ? '#00C85309' : '#FF3B3B09' }]}>
+                    <Text style={{ fontSize: 14 }}>{a.correct ? '✅' : '❌'}</Text>
+                    <Text style={[A.feedTxt, { color: a.correct ? '#00C853' : '#FFFFFF99' }]} numberOfLines={1}>{a.text}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {amWinner && (
               <View style={{ gap: 10 }}>
                 <TextInput
                   style={[A.input, { color: colors.foreground, borderColor: winnerColor, backgroundColor: `${winnerColor}08` }]}
@@ -600,12 +667,6 @@ function Round2UI() {
                 </TouchableOpacity>
               </View>
             )}
-            {amWinner && submitted && (
-              <View style={[A.waitBanner, { borderColor: `${winnerColor}44` }]}>
-                <ActivityIndicator color={winnerColor} size="small" />
-                <Text style={[A.waitTxt, { color: winnerColor }]}>جارٍ التصحيح...</Text>
-              </View>
-            )}
             {!amWinner && (
               <View style={[A.watchBanner, { borderColor: `${winnerColor}44`, backgroundColor: `${winnerColor}08` }]}>
                 <Ionicons name="eye" size={18} color={winnerColor} />
@@ -613,6 +674,18 @@ function Round2UI() {
               </View>
             )}
           </>
+        )}
+
+        {/* Final result banner */}
+        {isRoundEnd && state.round2Result && (
+          <View style={[A.winnerBanner, { borderColor: state.round2Result.outcome === 'won' ? '#00C853' : '#FF3B3B', backgroundColor: state.round2Result.outcome === 'won' ? '#00C85318' : '#FF3B3B18' }]}>
+            <Ionicons name={state.round2Result.outcome === 'won' ? 'trophy' : 'time'} size={18} color={state.round2Result.outcome === 'won' ? '#00C853' : '#FF3B3B'} />
+            <Text style={[A.winnerTxt, { color: state.round2Result.outcome === 'won' ? '#00C853' : '#FF3B3B' }]}>
+              {state.round2Result.outcome === 'won'
+                ? `${playerName(state.room, state.round2Result.winnerUserId ?? '')} أكمل الحصة! +${state.round2Result.pointsAwarded}`
+                : `انتهى الوقت — لم تكتمل الحصة`}
+            </Text>
+          </View>
         )}
       </ScrollView>
     </KeyboardAvoidingView>
@@ -633,8 +706,16 @@ const A = StyleSheet.create({
   stepMax: { fontSize: 12, fontFamily: 'Inter_500Medium' },
   bidBtn: { paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%' },
   bidBtnTxt: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#050510' },
+  withdrawBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 12, borderWidth: 1, paddingVertical: 10, width: '100%' },
+  withdrawBtnTxt: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#FF3B3B' },
+  countdownWrap: { borderRadius: 20, borderWidth: 1.5, padding: 20, gap: 10, alignItems: 'center' },
+  countdownLabel: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   winnerBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, borderWidth: 1.5, paddingVertical: 12, paddingHorizontal: 16 },
   winnerTxt: { fontSize: 14, fontFamily: 'Inter_700Bold', flex: 1 },
+  quotaRow: { flexDirection: 'row', gap: 14, justifyContent: 'center' },
+  quotaTxt: { fontSize: 16, fontFamily: 'Inter_700Bold' },
+  feedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 10, borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10 },
+  feedTxt: { fontSize: 12, fontFamily: 'Inter_500Medium', flex: 1, textAlign: 'right' },
   input: { borderWidth: 1.5, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, fontSize: 18, fontFamily: 'Inter_600SemiBold', textAlign: 'right' },
   waitBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, borderWidth: 1, paddingVertical: 16 },
   waitTxt: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
@@ -642,7 +723,7 @@ const A = StyleSheet.create({
   watchTxt: { fontSize: 15, fontFamily: 'Inter_700Bold' },
 });
 
-// ── Generic Buzzer (Round 3 / Round 5 / Tiebreaker) ───────────────────────────
+// ── Buzzer round (Round 3 only) ───────────────────────────────────────────────
 
 function BuzzerUI({ accentColor }: { accentColor: string }) {
   const { state, myUserId, buzz: doBuzz, submitAnswer } = useOnlineGame();
@@ -651,11 +732,11 @@ function BuzzerUI({ accentColor }: { accentColor: string }) {
   const [submitted, setSubmitted] = useState(false);
   const [hasBuzzed, setHasBuzzed] = useState(false);
 
-  const isBuzzPhase   = state.phase?.endsWith('_buzz')   ?? false;
-  const isAnswerPhase = state.phase?.endsWith('_answer')  ?? false;
+  const isBuzzPhase   = state.phase === 'round3_buzz';
+  const isAnswerPhase = state.phase === 'round3_answer';
   const amWinner      = state.buzzWinner?.userId === myUserId;
   const secs          = useCountdown(isBuzzPhase ? state.deadlineTs : (state.buzzWinner?.deadlineTs ?? null));
-  const maxSecs       = isBuzzPhase ? (state.currentRound === 'round3' ? 20 : state.currentRound === 'round5' ? 25 : 30) : (state.currentRound === 'round3' ? 10 : 12);
+  const maxSecs       = isBuzzPhase ? 20 : 10;
 
   const winnerColor = state.buzzWinner ? playerColor(state.room, state.buzzWinner.userId) : accentColor;
   const winnerName  = state.buzzWinner ? playerName(state.room, state.buzzWinner.userId) : '';
@@ -676,36 +757,13 @@ function BuzzerUI({ accentColor }: { accentColor: string }) {
     setSubmitted(true);
   };
 
-  const isTransfer = state.currentRound === 'round5' || state.currentRound === 'tiebreaker';
-  const transfers  = state.question?.transfers ?? [];
-  const displayChain = isTransfer ? [...transfers].reverse() : [];
-
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={BZ.content} keyboardShouldPersistTaps="handled">
-        {/* Question / Transfer chain */}
-        {isTransfer ? (
-          <View style={[BZ.chainCard, { backgroundColor: colors.card, borderColor: accentColor }]}>
-            <Text style={[BZ.chainLabel, { color: colors.mutedForeground }]}>مسار الانتقالات ← الأحدث أولاً</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={BZ.chainScroll}>
-              {displayChain.map((club, i) => (
-                <React.Fragment key={i}>
-                  {i > 0 && <Ionicons name="arrow-back" size={14} color={accentColor} style={{ opacity: 0.55 }} />}
-                  <ClubChip clubRaw={club} isNewest={i === 0} />
-                </React.Fragment>
-              ))}
-            </ScrollView>
-            <View style={[BZ.questionBadge, { borderColor: accentColor, backgroundColor: `${accentColor}10` }]}>
-              <Ionicons name="help-circle" size={18} color={accentColor} />
-              <Text style={[BZ.questionBadgeTxt, { color: accentColor }]}>من هو هذا اللاعب؟</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={[BZ.qCard, { backgroundColor: colors.card, borderColor: accentColor }]}>
-            <Text style={[BZ.qLabel, { color: accentColor }]}>السؤال</Text>
-            <Text style={[BZ.qTxt, { color: colors.foreground }]}>{state.question?.question ?? '...'}</Text>
-          </View>
-        )}
+        <View style={[BZ.qCard, { backgroundColor: colors.card, borderColor: accentColor }]}>
+          <Text style={[BZ.qLabel, { color: accentColor }]}>السؤال</Text>
+          <Text style={[BZ.qTxt, { color: colors.foreground }]}>{state.question?.question ?? '...'}</Text>
+        </View>
 
         {/* Buzz phase */}
         {isBuzzPhase && (
@@ -804,6 +862,81 @@ const BZ = StyleSheet.create({
   watchBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, borderWidth: 1.5, paddingVertical: 16 },
   watchTxt: { fontSize: 15, fontFamily: 'Inter_700Bold' },
 });
+
+// ── Race round (Round 5 / Tiebreaker) ─────────────────────────────────────────
+//
+// Offline parity: no buzzer. Any eligible player can submit a guess at any
+// time during the window; every guess is validated instantly and broadcast
+// via the generic game:answerResult event (shown by <ResultOverlay/>). Wrong
+// guesses don't eliminate — the text input stays open the whole window.
+
+function RaceUI({ accentColor }: { accentColor: string }) {
+  const { state, submitAnswer } = useOnlineGame();
+  const colors = useColors();
+  const [text, setText] = useState('');
+  const secs = useCountdown(state.deadlineTs);
+  const maxSecs = state.currentRound === 'tiebreaker' ? 30 : 25;
+
+  useEffect(() => { setText(''); }, [state.question?.id]);
+
+  const handleSubmit = () => {
+    if (!text.trim()) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    submitAnswer(text.trim());
+    setText('');
+  };
+
+  const transfers = state.question?.transfers ?? [];
+  const displayChain = [...transfers].reverse();
+
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={BZ.content} keyboardShouldPersistTaps="handled">
+        <View style={[BZ.chainCard, { backgroundColor: colors.card, borderColor: accentColor }]}>
+          <Text style={[BZ.chainLabel, { color: colors.mutedForeground }]}>مسار الانتقالات ← الأحدث أولاً</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={BZ.chainScroll}>
+            {displayChain.map((club, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && <Ionicons name="arrow-back" size={14} color={accentColor} style={{ opacity: 0.55 }} />}
+                <ClubChip clubRaw={club} isNewest={i === 0} />
+              </React.Fragment>
+            ))}
+          </ScrollView>
+          <View style={[BZ.questionBadge, { borderColor: accentColor, backgroundColor: `${accentColor}10` }]}>
+            <Ionicons name="help-circle" size={18} color={accentColor} />
+            <Text style={[BZ.questionBadgeTxt, { color: accentColor }]}>من هو هذا اللاعب؟</Text>
+          </View>
+        </View>
+
+        <View style={BZ.timerRow}>
+          <Text style={[BZ.timerLabel, { color: colors.mutedForeground }]}>الجميع يستطيع الإجابة الآن</Text>
+          <CountdownRing secs={secs} maxSecs={maxSecs} color={accentColor} />
+        </View>
+
+        <View style={{ gap: 10 }}>
+          <TextInput
+            style={[BZ.input, { color: colors.foreground, borderColor: accentColor, backgroundColor: `${accentColor}08` }]}
+            placeholder="اكتب اسم اللاعب..."
+            placeholderTextColor={`${accentColor}55`}
+            value={text}
+            onChangeText={setText}
+            onSubmitEditing={handleSubmit}
+            returnKeyType="send"
+            textAlign="right"
+          />
+          <TouchableOpacity onPress={handleSubmit} activeOpacity={0.85} disabled={!text.trim()}>
+            <LinearGradient
+              colors={text.trim() ? [accentColor, `${accentColor}BB`] : ['#333', '#222']}
+              style={BZ.sendBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+              <Ionicons name="send" size={18} color="#FFF" />
+              <Text style={BZ.sendBtnTxt}>إرسال</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
 
 // ── Round 4: Rapid Fire ────────────────────────────────────────────────────────
 
@@ -1071,82 +1204,15 @@ const GO = StyleSheet.create({
   backBtnTxt: { fontSize: 20, fontFamily: 'Inter_700Bold', color: '#050510' },
 });
 
-// ── Voice PTT button ───────────────────────────────────────────────────────────
-
-function VoicePTT() {
-  const { state, myUserId, sendVoiceClip, clearVoiceClip } = useOnlineGame();
-  const colors = useColors();
-  const [speaking, setSpeaking] = useState(false);
-  const speakerName = state.lastVoiceClip
-    ? playerName(state.room, state.lastVoiceClip.fromUserId)
-    : null;
-
-  // Auto-clear voice clip indicator after 2s
-  useEffect(() => {
-    if (!state.lastVoiceClip) return;
-    const t = setTimeout(clearVoiceClip, 2000);
-    return () => clearTimeout(t);
-  }, [state.lastVoiceClip]);
-
-  return (
-    <View style={VP.wrap} pointerEvents="box-none">
-      {speakerName && (
-        <View style={[VP.speakerPill, { backgroundColor: colors.card, borderColor: '#7B2FFF55' }]}>
-          <Ionicons name="mic" size={14} color="#7B2FFF" />
-          <Text style={[VP.speakerTxt, { color: '#7B2FFF' }]}>{speakerName} يتحدث...</Text>
-        </View>
-      )}
-      <TouchableOpacity
-        onPressIn={() => setSpeaking(true)}
-        onPressOut={() => setSpeaking(false)}
-        activeOpacity={0.8}
-        style={[VP.pttBtn, { backgroundColor: speaking ? '#7B2FFF' : colors.card, borderColor: '#7B2FFF66' }]}
-      >
-        <Ionicons name={speaking ? 'mic' : 'mic-outline'} size={20} color={speaking ? '#FFF' : '#7B2FFF'} />
-      </TouchableOpacity>
-    </View>
-  );
-}
-const VP = StyleSheet.create({
-  wrap: { position: 'absolute', bottom: 20, right: 16, alignItems: 'flex-end', gap: 6, zIndex: 90 },
-  speakerPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 20, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 12 },
-  speakerTxt: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  pttBtn: { width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', shadowColor: '#7B2FFF', shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
-});
-
 // ── Root Screen ────────────────────────────────────────────────────────────────
 
-// ── Mic button (reusable) ────────────────────────────────────────────────────
-
-function MicButton({ size = 36 }: { size?: number }) {
-  const voice = useVoice();
-  if (!voice?.isAvailable) return null;
-  const { isActive, isMuted, toggleMute } = voice;
-  const color = !isActive ? '#FFFFFF33' : isMuted ? '#FF3B3B' : '#00C853';
-  return (
-    <TouchableOpacity
-      onPress={toggleMute}
-      activeOpacity={0.75}
-      style={{
-        width: size, height: size, borderRadius: size / 2,
-        backgroundColor: `${color}18`,
-        borderWidth: 1.5, borderColor: color,
-        alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <Ionicons name={(isMuted ? 'mic-off' : 'mic') as any} size={size * 0.45} color={color} />
-    </TouchableOpacity>
-  );
-}
-
 export default function OnlineGameScreen() {
-  const { state, myUserId, getSocket, leaveRoom, disconnect } = useOnlineGame();
+  const { state, myUserId, leaveRoom, disconnect } = useOnlineGame();
   const router  = useRouter();
   const insets  = useSafeAreaInsets();
   const colors  = useColors();
   const topPad  = Platform.OS === 'web' ? 67 : insets.top;
   const sounds  = useSoundContext();
-  const voice   = useVoice();
 
   // ── Task 5: Sound effects tied to socket events ──────────────────────────
   // Correct / wrong on every answer result (round1Answer & answerResult)
@@ -1197,22 +1263,6 @@ export default function OnlineGameScreen() {
     try { sounds?.fanfarePlayer?.play(); } catch (_) {}
   }, [state.gameOver]);
 
-  // ── Voice: connect to room peers (voice was started in waiting room) ─────
-  useEffect(() => {
-    if (!state.room || !myUserId || !voice?.isAvailable) return;
-    const socket = getSocket();
-    if (!socket) return;
-    // If voice wasn't started yet (e.g. player entered directly), start it now
-    voice.startVoice().then(ok => {
-      if (!ok) return;
-      const peerIds = state.room!.players
-        .filter(p => p.userId !== myUserId && p.connected)
-        .map(p => p.userId);
-      voice.connectToPeers(socket, myUserId, peerIds);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.room?.players.length, myUserId]);
-
   // Leave if no room and no game over (user left externally)
   useEffect(() => {
     if (!state.room && !state.gameOver) {
@@ -1222,7 +1272,6 @@ export default function OnlineGameScreen() {
 
   const handleLeave = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    voice?.stopVoice();
     leaveRoom();
     disconnect();
     router.replace('/');
@@ -1258,8 +1307,8 @@ export default function OnlineGameScreen() {
         {!state.transitionRound && state.currentRound === 'round2' && <Round2UI />}
         {!state.transitionRound && state.currentRound === 'round3' && <BuzzerUI accentColor="#FF6B00" />}
         {!state.transitionRound && state.currentRound === 'round4' && <Round4UI />}
-        {!state.transitionRound && state.currentRound === 'round5' && <BuzzerUI accentColor="#00E5FF" />}
-        {!state.transitionRound && state.currentRound === 'tiebreaker' && <BuzzerUI accentColor="#FFD700" />}
+        {!state.transitionRound && state.currentRound === 'round5' && <RaceUI accentColor="#00E5FF" />}
+        {!state.transitionRound && state.currentRound === 'tiebreaker' && <RaceUI accentColor="#FFD700" />}
 
         {/* Loading / between phases */}
         {!state.transitionRound && !state.currentRound && (
@@ -1272,7 +1321,6 @@ export default function OnlineGameScreen() {
 
       {/* Overlays */}
       <ResultOverlay />
-      <VoicePTT />
     </View>
   );
 }

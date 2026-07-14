@@ -18,7 +18,6 @@ import { GameProvider } from '@/contexts/GameContext';
 import { MultiplayerProvider } from '@/contexts/MultiplayerContext';
 import { OnlineGameProvider } from '@/contexts/OnlineGameContext';
 import { SoundProvider } from '@/contexts/SoundContext';
-import { VoiceProvider } from '@/contexts/VoiceContext';
 import { warmAbortControllerPolyfill } from '@/lib/safeAbortPolyfill';
 
 // Warm RN's lazy AbortController/Event polyfill once at startup, defensively
@@ -64,11 +63,9 @@ export default function RootLayout() {
                 <GameProvider>
                   <MultiplayerProvider>
                     <OnlineGameProvider>
-                      <VoiceProvider>
-                        <SoundProvider>
-                          <RootLayoutNav />
-                        </SoundProvider>
-                      </VoiceProvider>
+                      <SoundProvider>
+                        <RootLayoutNav />
+                      </SoundProvider>
                     </OnlineGameProvider>
                   </MultiplayerProvider>
                 </GameProvider>
