@@ -13,43 +13,19 @@ import { Router, type IRouter } from "express";
 import { ObjectId } from "mongodb";
 import { getDb } from "../lib/mongodb";
 import { requireAuth } from "../middlewares/requireAuth";
+import { xpForNextLevel, applyMatchReward } from "../lib/xp";
 
 const router: IRouter = Router();
-
-function xpForNextLevel(level: number): number {
-  return Math.floor(100 * Math.pow(level, 1.5));
-}
 
 router.post("/game/reward", requireAuth, async (req, res) => {
   const { won } = req.body as { won?: boolean };
   const isWin = won === true;
 
   try {
-    const db    = await getDb();
-    const users = db.collection("users");
-    const user  = await users.findOne({ _id: new ObjectId(req.userId) });
-    if (!user) { res.status(404).json({ error: "المستخدم غير موجود" }); return; }
-
-    let level     = (user["level"]     as number) ?? 1;
-    let xp        = (user["xp"]        as number) ?? 0;
-    let totalWins = (user["totalWins"] as number) ?? 0;
-
-    const xpGain = isWin ? 200 : 50; // 50 for playing, 150 bonus for winning
-    xp += xpGain;
-    if (isWin) totalWins += 1;
-
-    // Level up loop
-    while (xp >= xpForNextLevel(level)) {
-      xp -= xpForNextLevel(level);
-      level += 1;
-    }
-
-    await users.updateOne(
-      { _id: new ObjectId(req.userId) },
-      { $set: { level, xp, totalWins } },
-    );
-
-    res.json({ ok: true, level, xp, totalWins, xpGain, leveledUp: level > ((user["level"] as number) ?? 1) });
+    const db     = await getDb();
+    const result = await applyMatchReward(db, req.userId as string, isWin);
+    if (!result) { res.status(404).json({ error: "المستخدم غير موجود" }); return; }
+    res.json({ ok: true, ...result });
   } catch (err) {
     console.error("[game/reward] failed:", err);
     res.status(500).json({ error: "فشل تحديث الإحصائيات" });

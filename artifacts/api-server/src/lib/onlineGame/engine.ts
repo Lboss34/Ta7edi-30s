@@ -1,5 +1,7 @@
 import type { Server } from "socket.io";
 import type { Db } from "mongodb";
+import { getDb } from "../mongodb";
+import { applyMatchReward } from "../xp";
 import { isAnswerCorrect } from "./textMatch";
 import { serializeRoom } from "./rooms";
 import type {
@@ -852,6 +854,25 @@ function askRound5Question(io: Server, room: Room) {
 
 // ─── Game end + Tiebreaker ────────────────────────────────────────────────────
 
+/**
+ * Persists XP/level/totalWins for every player in the room now that the
+ * match has finished. The server is the sole authority for this — the
+ * client never reports match results itself. Fire-and-forget: a DB hiccup
+ * here must not block the `game:over` event already sent to clients.
+ */
+function awardMatchRewards(room: Room, winnerUserId: string | null) {
+  void (async () => {
+    try {
+      const db = await getDb();
+      await Promise.all(
+        room.players.map((p) => applyMatchReward(db, p.userId, p.userId === winnerUserId)),
+      );
+    } catch (err) {
+      console.error("[onlineGame] failed to award match rewards:", err);
+    }
+  })();
+}
+
 function finishGame(io: Server, room: Room) {
   const maxScore = Math.max(...room.players.map((p) => p.score));
   const tied = room.players.filter((p) => p.score === maxScore);
@@ -860,9 +881,11 @@ function finishGame(io: Server, room: Room) {
     room.status = "finished";
     room.currentRound = null;
     room.phase = "game_over";
+    const winnerUserId = tied[0]?.userId ?? null;
+    awardMatchRewards(room, tied.length > 1 ? null : winnerUserId);
     emitRoom(io, room, "game:over", {
       scores:       scoreMap(room),
-      winnerUserId: tied[0]?.userId ?? null,
+      winnerUserId,
       tied:         tied.length > 1 ? tied.map((p) => p.userId) : [],
     });
     return;
@@ -890,6 +913,7 @@ function tiebreakerConfig(): RaceRoundConfig {
       if (correct && winnerUserId) {
         room.status = "finished";
         room.phase = "game_over";
+        awardMatchRewards(room, winnerUserId);
         emitRoom(io, room, "game:over", {
           scores:               scoreMap(room),
           winnerUserId,
@@ -902,6 +926,7 @@ function tiebreakerConfig(): RaceRoundConfig {
       if (room.tiebreakerIndex >= room.tiebreakerPool.length) {
         room.status = "finished";
         room.phase = "game_over";
+        awardMatchRewards(room, null);
         emitRoom(io, room, "game:over", {
           scores:       scoreMap(room),
           winnerUserId: null,
